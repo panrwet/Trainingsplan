@@ -59,11 +59,29 @@ npx serve .
 
 Dann im Browser `http://localhost:8000` öffnen.
 
-### Auf dem Handy installieren
+### Auf dem iPhone/Android installieren (GitHub Pages)
 
-Über **GitHub Pages** o. Ä. deployen (Repo-Einstellungen → Pages → Branch wählen).
-Im Handy-Browser die Seite öffnen → Menü → **„Zum Startbildschirm hinzufügen"**.
-Danach läuft die App wie eine native App, auch offline.
+Ein GitHub-Actions-Workflow (`.github/workflows/deploy-pages.yml`) deployt die App
+automatisch. **Voraussetzung: das Repository ist öffentlich** (Pages für private
+Repos braucht einen kostenpflichtigen Plan).
+
+1. Repo **öffentlich** schalten (Settings → General → Danger Zone → *Change visibility*).
+2. Der Workflow läuft beim nächsten Push (oder unter *Actions → Deploy to GitHub Pages → Run workflow*).
+3. Die Seite ist dann unter `https://panrwet.github.io/Trainingsplan/` erreichbar.
+4. **iPhone (Safari):** Seite öffnen → Teilen-Symbol → **„Zum Home-Bildschirm"**.
+   **Android (Chrome):** Menü → **„App installieren"** / „Zum Startbildschirm".
+
+Danach läuft die App im Vollbild wie eine native App und funktioniert offline.
+
+### Hinweise für iPhone (iOS/Safari)
+
+- **Als Home-Bildschirm-App installieren** – nur dann speichert iOS die Daten dauerhaft.
+  Im normalen Safari-Tab löscht iOS lokale Daten nach 7 Tagen ohne Nutzung.
+- **Ton am Pausenende** funktioniert, sobald die App einmal angetippt wurde
+  (iOS schaltet Audio erst nach einer Nutzer-Geste frei – ist eingebaut).
+- **Vibration** unterstützt iOS-Safari generell nicht (nur Android). Der sichtbare
+  Countdown läuft trotzdem.
+- Mach in jedem Fall regelmäßig ein **Backup** (*Einstellungen → Export*).
 
 ## Erste Schritte
 

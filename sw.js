@@ -1,5 +1,5 @@
 // Service Worker – Offline-Fähigkeit für die Trainings-PWA
-const CACHE = 'trainingsplan-v1';
+const CACHE = 'trainingsplan-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,10 @@ const ASSETS = [
   './js/db.js',
   './icons/icon.svg',
   './icons/icon-maskable.svg',
+  './icons/icon-180.png',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-512-maskable.png',
 ];
 
 self.addEventListener('install', (e) => {

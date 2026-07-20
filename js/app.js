@@ -815,18 +815,49 @@ function stopRest() {
   const bar = document.getElementById('restBar');
   if (bar) bar.classList.add('hidden');
 }
+// Gemeinsamer AudioContext + Freischaltung.
+// iOS/Safari erlaubt Ton nur, wenn der AudioContext einmal per Nutzer-Geste
+// gestartet wurde. Deshalb beim ersten Antippen freischalten – danach kann
+// auch der Timer (ohne direkte Geste) piepen.
+let audioCtx = null;
+let audioUnlocked = false;
+function getAudioCtx() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch (e) { return null; }
+  }
+  return audioCtx;
+}
+function unlockAudio() {
+  const ctx = getAudioCtx(); if (!ctx) return;
+  if (ctx.state === 'suspended') ctx.resume();
+  if (!audioUnlocked) {
+    try {
+      const b = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = b; src.connect(ctx.destination); src.start(0);
+    } catch (e) { /* ignore */ }
+    audioUnlocked = true;
+  }
+}
+document.addEventListener('pointerdown', unlockAudio);
+document.addEventListener('touchstart', unlockAudio, { passive: true });
+
 function beep() {
   if (!DB.db().settings.soundOnRestEnd) return;
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = getAudioCtx(); if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume();
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.connect(g); g.connect(ctx.destination);
     o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.12;
-    o.start();
-    o.frequency.setValueAtTime(660, ctx.currentTime + 0.15);
-    setTimeout(() => { o.stop(); ctx.close(); }, 400);
-    if (navigator.vibrate) navigator.vibrate([200, 80, 200]);
+    const t = ctx.currentTime;
+    o.start(t);
+    o.frequency.setValueAtTime(660, t + 0.15);
+    o.stop(t + 0.4); // Kontext offen lassen (Wiederverwendung)
   } catch (e) { /* Audio evtl. blockiert */ }
+  // Vibration wird von iOS-Safari nicht unterstützt – auf Android o.k.
+  if (navigator.vibrate) { try { navigator.vibrate([200, 80, 200]); } catch (e) { /* ignore */ } }
 }
 
 function discardSession(id) {
