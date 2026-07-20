@@ -640,14 +640,17 @@ route('/library', () => {
     return;
   }
 
+  const equipList = DB.equipmentTypes();
   let html = `<input id="libSearch" placeholder="Suchen …" style="margin-bottom:10px" />
     <div class="filter-bar">
       <div class="filter-row" id="filterMuscles">${DB.MUSCLE_GROUPS.map(m => `<button class="filter-chip ${libFilter.muscles.has(m) ? 'sel' : ''}" data-fm="${esc(m)}">${esc(m)}</button>`).join('')}</div>
-      <div class="filter-row" id="filterEquip">${DB.EQUIPMENT_TYPES.map(eq => `<button class="filter-chip ${libFilter.equipment.has(eq) ? 'sel' : ''}" data-fe="${esc(eq)}">${esc(eq)}</button>`).join('')}</div>
+      <div class="filter-row" id="filterEquip">${equipList.map(eq => `<button class="filter-chip ${libFilter.equipment.has(eq.name) ? 'sel' : ''}" data-fe="${esc(eq.name)}">${esc(eq.name)}</button>`).join('')}
+        <button class="filter-chip add" id="manageEqChip" title="Geräte-Arten verwalten">⚙️ Geräte</button></div>
     </div>
     <div id="libCount" class="tiny muted" style="margin:8px 0"></div>
     <div id="libList"></div>`;
   appEl.innerHTML = html;
+  $('#manageEqChip', appEl).onclick = () => manageEquipmentModal();
 
   $$('[data-fm]', appEl).forEach(b => b.onclick = () => {
     const m = b.dataset.fm;
@@ -703,7 +706,7 @@ function editExerciseModal(id, onSaved) {
       <label class="field"><span>Muskelgruppen</span></label>
       <div class="filter-row" id="f-muscles" style="margin:-4px 0 12px">${DB.MUSCLE_GROUPS.map(m => `<button type="button" class="filter-chip ${muscles.has(m) ? 'sel' : ''}" data-m="${esc(m)}">${esc(m)}</button>`).join('')}</div>
       <label class="field"><span>Gerät</span></label>
-      <div class="filter-row" id="f-equip" style="margin:-4px 0 12px">${DB.EQUIPMENT_TYPES.map(eq => `<button type="button" class="filter-chip ${equipment === eq ? 'sel' : ''}" data-e="${esc(eq)}">${esc(eq)}</button>`).join('')}</div>
+      <div class="filter-row" id="f-equip" style="margin:-4px 0 12px"></div>
       <label class="field"><span>Einheit</span>
         <select id="f-unit"><option value="kg"${ex.unit === 'kg' ? ' selected' : ''}>kg</option><option value="lb"${ex.unit === 'lb' ? ' selected' : ''}>lb</option></select></label>
       <label class="field"><span>Notiz (optional)</span><textarea id="f-notes" placeholder="Technik-Hinweise, Einstellung am Gerät …">${esc(ex.notes)}</textarea></label>`,
@@ -713,10 +716,17 @@ function editExerciseModal(id, onSaved) {
         muscles.has(b.dataset.m) ? muscles.delete(b.dataset.m) : muscles.add(b.dataset.m);
         b.classList.toggle('sel');
       });
-      $$('[data-e]', m).forEach(b => b.onclick = () => {
-        equipment = equipment === b.dataset.e ? '' : b.dataset.e;
-        $$('[data-e]', m).forEach(x => x.classList.toggle('sel', x.dataset.e === equipment));
-      });
+      function redrawEquip() {
+        const equipList = DB.equipmentTypes();
+        $('#f-equip', m).innerHTML = equipList.map(eq => `<button type="button" class="filter-chip ${equipment === eq.name ? 'sel' : ''}" data-e="${esc(eq.name)}">${esc(eq.name)}</button>`).join('')
+          + `<button type="button" class="filter-chip add" data-add-eq>+ Neu</button>`;
+        $$('[data-e]', m).forEach(b => b.onclick = () => {
+          equipment = equipment === b.dataset.e ? '' : b.dataset.e;
+          redrawEquip();
+        });
+        $('[data-add-eq]', m).onclick = () => quickAddEquipment(name => { equipment = name; redrawEquip(); });
+      }
+      redrawEquip();
       $('[data-x]', m).onclick = close;
       $('[data-ok]', m).onclick = () => {
         const name = $('#f-name', m).value.trim();
@@ -738,6 +748,93 @@ function editExerciseModal(id, onSaved) {
         const warn = usage ? `Diese Übung wurde ${usage}× trainiert. Beim Löschen bleiben die Einheiten erhalten, aber die Statistik ist nicht mehr erreichbar. Trotzdem löschen?` : 'Übung löschen?';
         if (await confirmDialog(warn, { danger: true, okText: 'Löschen' })) { DB.deleteExercise(id); close(); render(); }
       };
+    },
+  });
+}
+
+// Kleiner, gestapelter Dialog um schnell eine neue Geräte-Art anzulegen (z.B.
+// direkt beim Taggen einer Übung, ohne den aktuellen Dialog zu verlassen).
+function quickAddEquipment(onAdded) {
+  openModal({
+    title: 'Neue Geräte-Art',
+    body: `<label class="field"><span>Name</span><input id="f-eqname" placeholder="z.B. Widerstandsband" /></label>`,
+    footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Anlegen</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        const name = $('#f-eqname', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        const eq = DB.addEquipmentType(name);
+        close();
+        onAdded(eq.name);
+      };
+      $('#f-eqname', m).focus();
+    },
+  });
+}
+
+// Geräte-Arten verwalten: anlegen, umbenennen (mit Übernahme bei allen
+// betroffenen Übungen) und löschen (entfernt das Tag bei betroffenen Übungen,
+// die Übung selbst bleibt erhalten).
+function manageEquipmentModal() {
+  let editingId = null;
+  function draw(m) {
+    const list = DB.equipmentTypes();
+    const listEl = $('#eqList', m);
+    listEl.innerHTML = list.length ? list.map(e => {
+      const uses = DB.equipmentUsage(e.id);
+      if (editingId === e.id) {
+        return `<div class="list-row" data-eq="${e.id}">
+          <input id="f-rename-${e.id}" value="${esc(e.name)}" style="flex:1" />
+          <button class="btn ghost sm" data-save="${e.id}">✓</button>
+          <button class="btn ghost sm" data-cancel="${e.id}">✕</button>
+        </div>`;
+      }
+      return `<div class="list-row" data-eq="${e.id}">
+        <div class="grow"><div class="r-title">${esc(e.name)}</div><div class="r-sub">${uses ? uses + '× verwendet' : 'unbenutzt'}</div></div>
+        <button class="btn ghost sm" data-rename="${e.id}">✏️</button>
+        <button class="btn ghost sm" data-del="${e.id}">🗑️</button>
+      </div>`;
+    }).join('') : `<div class="tiny muted center" style="padding:10px">Noch keine Geräte-Arten.</div>`;
+
+    $$('[data-rename]', listEl).forEach(b => b.onclick = () => { editingId = b.dataset.rename; draw(m); });
+    $$('[data-cancel]', listEl).forEach(b => b.onclick = () => { editingId = null; draw(m); });
+    $$('[data-save]', listEl).forEach(b => b.onclick = () => {
+      const rid = b.dataset.save;
+      const val = $(`#f-rename-${rid}`, listEl).value.trim();
+      if (val) DB.renameEquipmentType(rid, val);
+      editingId = null; draw(m);
+    });
+    $$('[data-del]', listEl).forEach(b => b.onclick = async () => {
+      const rid = b.dataset.del; const eq = DB.getEquipmentType(rid); const uses = DB.equipmentUsage(rid);
+      const warn = uses ? `„${eq.name}" wird bei ${uses} Übung(en) verwendet. Beim Löschen wird das Gerät dort entfernt (Übung bleibt erhalten). Trotzdem löschen?` : `„${eq.name}" löschen?`;
+      if (await confirmDialog(warn, { danger: true, okText: 'Löschen' })) { DB.deleteEquipmentType(rid); draw(m); }
+    });
+  }
+  openModal({
+    title: 'Geräte-Arten verwalten',
+    body: `<div class="btn-row" style="margin-bottom:12px">
+        <input id="f-newEq" placeholder="Neue Geräte-Art, z.B. Kettlebell" style="flex:1" />
+        <button class="btn primary" id="addEqBtn">+ Anlegen</button>
+      </div>
+      <div id="eqList"></div>`,
+    footer: `<button class="btn ghost" data-x>Fertig</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = () => {
+        close();
+        // veraltete Filterauswahl bereinigen, falls ein gefilterter Name umbenannt/gelöscht wurde
+        const validNames = new Set(DB.equipmentTypes().map(e => e.name));
+        [...libFilter.equipment].forEach(n => { if (!validNames.has(n)) libFilter.equipment.delete(n); });
+        render();
+      };
+      $('#addEqBtn', m).onclick = () => {
+        const name = $('#f-newEq', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        DB.addEquipmentType(name);
+        $('#f-newEq', m).value = '';
+        draw(m);
+      };
+      draw(m);
     },
   });
 }

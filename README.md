@@ -5,7 +5,8 @@ Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – instal
 
 ## Funktionen
 
-- **Übungsbibliothek** – ~48 vorbefüllte Übungen (Name, Muskelgruppen, Gerät, Notiz), **filterbar nach Muskelgruppe und Gerät** (Langhantel/Kurzhantel/Maschine/Kabelzug/Körpergewicht). Ortübergreifend gemeinsam nutzbar – jedes Gym hat z. B. eine Brustpresse, die Übung muss nicht pro Ort neu angelegt werden.
+- **Übungsbibliothek** – ~48 vorbefüllte Übungen (Name, Muskelgruppen, Gerät, Notiz), **filterbar nach Muskelgruppe und Gerät** (kombinierbar mit Suche). Ortübergreifend gemeinsam nutzbar – jedes Gym hat z. B. eine Brustpresse, die Übung muss nicht pro Ort neu angelegt werden.
+- **Geräte-Arten selbst verwalten** – über „⚙️ Geräte" in der Bibliothek eigene Geräte-Arten anlegen/umbenennen/löschen (z. B. „Kettlebell", „Widerstandsband"). Umbenennen aktualisiert alle betroffenen Übungen automatisch, Löschen entfernt nur das Tag (Übung bleibt erhalten). Beim Taggen einer Übung geht's auch direkt per „+ Neu"-Chip.
 - **Hierarchie:** **Ort** (z. B. Sports Club Kiel, Zuhause) → **Trainingsplan** → **Trainingstag** → **Übungen**
 - **Orte oben als Reiter** – der aktive Ort filtert die ganze App. **Statistik, „letztes Mal" und Verlauf sind je Ort getrennt**, weil Geräte zwischen Gyms nicht vergleichbar sind (z. B. Brustpresse 80 kg in Gym A ≙ 50 kg in Gym B). Das Orts-Kürzel steht klein neben Plan/Trainingstag/Übung.
 - **Plan in ein anderes Gym übernehmen** – ein Trainingsplan (inkl. aller Trainingstage & Zielwerte) lässt sich per Knopfdruck als unabhängige Kopie an einen anderen Ort kopieren, da das Kerntraining ja gleich bleibt. Original und Kopie sind danach getrennt frei änderbar.

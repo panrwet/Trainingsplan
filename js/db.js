@@ -13,14 +13,18 @@ const KEY = 'trainingsplan.v1';
 // automatisch befüllt wird (nur diese eine automatische Migration tut das).
 export const SEED_VERSION = 2;
 
-// Feste Vokabulare für Muskelgruppen & Geräte-Art (für Übungsbibliothek-Filter)
+// Feste Vokabular für Muskelgruppen (Anatomie ändert sich nicht -> nicht verwaltbar).
 export const MUSCLE_GROUPS = ['Brust', 'Rücken', 'Schultern', 'Bizeps', 'Trizeps', 'Unterarme', 'Quadrizeps', 'Beinbeuger', 'Gesäß', 'Waden', 'Bauch', 'Ganzkörper'];
-export const EQUIPMENT_TYPES = ['Langhantel', 'Kurzhantel', 'Maschine', 'Kabelzug', 'Körpergewicht', 'Sonstiges'];
+
+// Geräte-Arten sind dagegen selbst verwaltbar (siehe equipmentTypes() u.a. unten) -
+// diese Liste ist nur der Startbestand für neue/bestehende Installationen.
+const DEFAULT_EQUIPMENT = ['Langhantel', 'Kurzhantel', 'Maschine', 'Kabelzug', 'Körpergewicht', 'Sonstiges'];
 
 const DEFAULTS = () => ({
   version: 1,
   settings: { defaultRestSec: 90, soundOnRestEnd: true, seedVersion: 0 },
   exercises: [],   // Bibliothek: {id,name,muscles[],equipment,notes,unit,createdAt}
+  equipmentTypes: DEFAULT_EQUIPMENT.map(name => ({ id: uid('eq'), name, createdAt: Date.now() })), // {id,name,createdAt}
   locations: [],   // Orte:        {id,name,emoji,color,createdAt}
   plans: [],       // Pläne:       {id,locationId,name,emoji,color,createdAt}
   days: [],        // Trainingstage:{id,planId,name,emoji,color,order,exercises:[{id,exerciseId,sets,reps,restSec}],createdAt}
@@ -79,6 +83,37 @@ export function deleteExercise(id) {
 // Wie oft wurde eine Übung in Einheiten genutzt (für Löschwarnung)
 export function exerciseUsage(id) {
   return db().sessions.filter(s => (s.entries || []).some(e => e.exerciseId === id)).length;
+}
+
+// ---------- Geräte-Arten (selbst verwaltbar, für Filter + Übungs-Tagging) ----------
+export function equipmentTypes() { return db().equipmentTypes.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')); }
+export function getEquipmentType(id) { return db().equipmentTypes.find(e => e.id === id) || null; }
+export function addEquipmentType(name) {
+  name = String(name || '').trim(); if (!name) return null;
+  const existing = db().equipmentTypes.find(e => e.name.toLowerCase() === name.toLowerCase());
+  if (existing) return existing;
+  const e = { id: uid('eq'), name, createdAt: Date.now() };
+  db().equipmentTypes.push(e); save(); return e;
+}
+export function renameEquipmentType(id, newName) {
+  newName = String(newName || '').trim(); if (!newName) return;
+  const e = getEquipmentType(id); if (!e) return;
+  const oldName = e.name;
+  e.name = newName;
+  if (oldName !== newName) {
+    db().exercises.forEach(ex => { if (ex.equipment === oldName) ex.equipment = newName; });
+  }
+  save();
+}
+export function deleteEquipmentType(id) {
+  const e = getEquipmentType(id); if (!e) return;
+  db().exercises.forEach(ex => { if (ex.equipment === e.name) ex.equipment = ''; });
+  db().equipmentTypes = db().equipmentTypes.filter(x => x.id !== id);
+  save();
+}
+export function equipmentUsage(id) {
+  const e = getEquipmentType(id); if (!e) return 0;
+  return db().exercises.filter(ex => ex.equipment === e.name).length;
 }
 
 // ---------- Orte ----------
