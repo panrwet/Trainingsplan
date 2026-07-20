@@ -31,10 +31,24 @@ Für Krafttraining sind das die aussagekräftigsten Kennzahlen:
 - Nachteil: Daten hängen an **diesem Browser/Gerät**. Deshalb gibt es **Export/Import** unter *Einstellungen → Daten & Backup*. Mach regelmäßig ein Backup.
 - Ein späterer optionaler Cloud-Sync wäre möglich, ist aber bewusst nicht eingebaut (Aufwand/Datenschutz).
 
-## Starten
+## Sofort testen – ohne Server (einfachster Weg)
 
-Da es reine statische Dateien sind, brauchst du nur einen kleinen Webserver
-(Service Worker & ES-Module funktionieren nicht direkt per `file://`):
+Die Datei **`standalone.html`** enthält die komplette App in einer einzigen Datei.
+
+1. In GitHub auf `standalone.html` klicken → **„Download raw file"** (Download-Symbol).
+2. Die heruntergeladene Datei per **Doppelklick** im Browser öffnen.
+
+Fertig – kein Server, keine Installation. Die Daten werden im Browser gespeichert.
+Unter *Einstellungen → Beispieldaten* kannst du Demo-Inhalte laden.
+
+> `standalone.html` wird aus den Quelldateien erzeugt: `node build-standalone.mjs`.
+> Hinweis: Auf `file://` ist die App nicht „installierbar" und nicht offline-cachend
+> (dafür die Server-/Pages-Variante unten nutzen).
+
+## Als richtige App / mit Webserver
+
+Für PWA-Installation (aufs Handy) und Offline-Cache über einen kleinen Webserver
+starten (Service Worker & ES-Module brauchen `http://`, nicht `file://`):
 
 ```bash
 # Variante 1: Python

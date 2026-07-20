@@ -1,0 +1,1803 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1220" />
+  <title>Trainingsplan – Krafttraining Tracker</title>
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Training" />
+  <style>
+:root {
+  --bg: #0f1220;
+  --bg-elev: #171b2e;
+  --bg-elev2: #1f2440;
+  --border: #2a2f4a;
+  --text: #e8eaf2;
+  --text-dim: #9aa0bd;
+  --text-dim2: #6b7096;
+  --accent: #6c8cff;
+  --accent-2: #4a63c7;
+  --good: #46c98b;
+  --warn: #ffb454;
+  --bad: #ff6b6b;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --tabbar-h: 62px;
+  --topbar-h: 54px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+  overscroll-behavior-y: none;
+}
+
+/* ---------- Topbar ---------- */
+#topbar {
+  position: sticky; top: 0; z-index: 50;
+  height: calc(var(--topbar-h) + var(--safe-t));
+  padding-top: var(--safe-t);
+  display: flex; align-items: center; gap: 6px;
+  padding-left: 10px; padding-right: 10px;
+  background: rgba(15,18,32,.9);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+#title {
+  font-size: 1.15rem; font-weight: 700; margin: 0;
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#topActions { display: flex; gap: 6px; align-items: center; }
+
+.icon-btn {
+  background: transparent; border: none; color: var(--text);
+  font-size: 1.6rem; line-height: 1; width: 40px; height: 40px;
+  border-radius: 10px; cursor: pointer; display: grid; place-items: center;
+}
+.icon-btn:active { background: var(--bg-elev2); }
+
+/* ---------- Layout ---------- */
+#app {
+  padding: 14px 14px calc(var(--tabbar-h) + var(--safe-b) + 20px);
+  max-width: 720px; margin: 0 auto;
+}
+
+/* ---------- Tabbar ---------- */
+#tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+  height: calc(var(--tabbar-h) + var(--safe-b));
+  padding-bottom: var(--safe-b);
+  display: flex; justify-content: space-around; align-items: stretch;
+  background: rgba(23,27,46,.96);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border);
+}
+.tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; text-decoration: none; color: var(--text-dim2);
+  font-size: .68rem; font-weight: 600;
+}
+.tab .tico { font-size: 1.25rem; filter: grayscale(.4); opacity: .8; }
+.tab.active { color: var(--accent); }
+.tab.active .tico { filter: none; opacity: 1; }
+
+/* ---------- Cards & lists ---------- */
+.card {
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px; margin-bottom: 12px;
+}
+.card.tap { cursor: pointer; }
+.card.tap:active { background: var(--bg-elev2); }
+
+.list-row {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px;
+  cursor: pointer;
+}
+.list-row:active { background: var(--bg-elev2); }
+.list-row .chip {
+  flex: 0 0 auto; width: 42px; height: 42px; border-radius: 12px;
+  display: grid; place-items: center; font-size: 1.35rem; font-weight: 700;
+  background: var(--bg-elev2);
+}
+.list-row .grow { flex: 1; min-width: 0; }
+.list-row .grow .r-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-row .grow .r-sub { color: var(--text-dim); font-size: .82rem; margin-top: 2px; }
+.list-row .arrow { color: var(--text-dim2); font-size: 1.3rem; }
+
+.section-title {
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-dim2); font-weight: 700; margin: 18px 2px 8px;
+}
+.muted { color: var(--text-dim); }
+.tiny { font-size: .78rem; }
+.center { text-align: center; }
+
+.empty {
+  text-align: center; color: var(--text-dim); padding: 30px 16px;
+  border: 1px dashed var(--border); border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+.empty .big { font-size: 2.2rem; margin-bottom: 8px; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--bg-elev2); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 11px 16px; font-size: .95rem; font-weight: 650;
+  cursor: pointer; text-decoration: none; font-family: inherit;
+}
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.good { background: var(--good); border-color: var(--good); color: #06281a; }
+.btn.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
+.btn.ghost { background: transparent; }
+.btn.block { display: flex; width: 100%; }
+.btn.sm { padding: 7px 11px; font-size: .82rem; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.fab {
+  position: fixed; right: 16px;
+  bottom: calc(var(--tabbar-h) + var(--safe-b) + 16px);
+  z-index: 45; width: 56px; height: 56px; border-radius: 50%;
+  background: var(--accent); color: #fff; border: none; font-size: 1.9rem;
+  box-shadow: 0 6px 18px rgba(0,0,0,.4); cursor: pointer; display: grid; place-items: center;
+}
+.fab:active { transform: scale(.95); }
+
+/* ---------- Forms ---------- */
+label.field { display: block; margin-bottom: 12px; }
+label.field > span { display: block; font-size: .8rem; color: var(--text-dim); margin-bottom: 5px; font-weight: 600; }
+input, select, textarea {
+  width: 100%; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 11px 12px; font-size: 1rem; font-family: inherit;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+textarea { resize: vertical; min-height: 70px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+/* number inputs w/o spinner clutter on mobile */
+input[type=number] { -moz-appearance: textfield; }
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ---------- Emoji / Kürzel picker ---------- */
+.emoji-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.emoji-pick button {
+  width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--bg); font-size: 1.25rem; cursor: pointer;
+}
+.emoji-pick button.sel { border-color: var(--accent); background: var(--bg-elev2); }
+.color-pick { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+.color-pick button {
+  width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer;
+}
+.color-pick button.sel { border-color: #fff; }
+
+/* ---------- Training screen ---------- */
+.train-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.train-head .chip { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; font-size: 1.5rem; background: var(--bg-elev2); }
+
+.ex-block { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
+.ex-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.ex-head .ex-name { flex: 1; font-weight: 700; }
+.ex-last { padding: 6px 14px; font-size: .78rem; color: var(--text-dim); background: var(--bg-elev2); border-bottom: 1px solid var(--border); }
+.ex-last b { color: var(--text); font-weight: 650; }
+.ex-body { padding: 10px 12px 12px; }
+
+.set-row { display: grid; grid-template-columns: 26px 1fr 1fr 44px 40px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.set-row .setno { color: var(--text-dim2); font-weight: 700; text-align: center; font-size: .9rem; }
+.set-row input { padding: 9px 8px; text-align: center; }
+.set-row.done input { border-color: var(--good); }
+.set-check { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); font-size: 1.1rem; cursor: pointer; display: grid; place-items: center; }
+.set-check.on { background: var(--good); border-color: var(--good); color: #06281a; }
+.set-del { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--text-dim2); cursor: pointer; }
+.set-head { display: grid; grid-template-columns: 26px 1fr 1fr 44px 40px; gap: 8px; font-size: .7rem; color: var(--text-dim2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; padding: 0 2px; }
+.set-head span { text-align: center; }
+
+.ex-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+
+/* ---------- Rest timer ---------- */
+#restBar {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  top: calc(var(--topbar-h) + var(--safe-t) + 8px);
+  z-index: 60; background: var(--accent); color: #fff;
+  border-radius: 999px; padding: 10px 16px; display: flex; align-items: center; gap: 14px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.45); font-weight: 700;
+  max-width: calc(100% - 24px);
+}
+#restBar.hidden { display: none; }
+#restBar .rt-time { font-variant-numeric: tabular-nums; font-size: 1.15rem; min-width: 52px; text-align: center; }
+#restBar button { background: rgba(255,255,255,.2); border: none; color: #fff; border-radius: 999px; padding: 6px 12px; font-weight: 700; cursor: pointer; }
+
+/* ---------- Modal ---------- */
+.modal-back { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.55); display: flex; align-items: flex-end; justify-content: center; }
+.modal {
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 18px 18px 0 0; width: 100%; max-width: 560px;
+  max-height: 88vh; overflow-y: auto; padding: 18px 16px calc(20px + var(--safe-b));
+  animation: slideUp .18s ease;
+}
+@keyframes slideUp { from { transform: translateY(30px); opacity: .6; } to { transform: none; opacity: 1; } }
+.modal h2 { margin: 0 0 14px; font-size: 1.1rem; }
+@media (min-width: 620px) {
+  .modal-back { align-items: center; }
+  .modal { border-radius: 18px; }
+}
+
+/* ---------- Chips / badges ---------- */
+.badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge { font-size: .72rem; padding: 3px 8px; border-radius: 999px; background: var(--bg-elev2); color: var(--text-dim); border: 1px solid var(--border); }
+.badge.accent { color: var(--accent); border-color: var(--accent-2); }
+
+/* ---------- Calendar ---------- */
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.cal-head h2 { margin: 0; font-size: 1.1rem; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.cal-dow { text-align: center; font-size: .68rem; color: var(--text-dim2); font-weight: 700; padding-bottom: 2px; }
+.cal-cell {
+  aspect-ratio: 1 / 1; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-elev); display: flex; flex-direction: column; align-items: center; justify-content: center;
+  position: relative; font-size: .7rem; overflow: hidden; cursor: pointer;
+}
+.cal-cell.empty-cell { background: transparent; border-color: transparent; cursor: default; }
+.cal-cell .cal-day { position: absolute; top: 3px; left: 5px; color: var(--text-dim2); font-size: .62rem; }
+.cal-cell.today { border-color: var(--accent); }
+.cal-cell .cal-emojis { font-size: 1.05rem; line-height: 1.05; display: flex; flex-wrap: wrap; justify-content: center; gap: 1px; margin-top: 6px; }
+.cal-cell .cal-kuerzel { font-size: .62rem; font-weight: 700; margin-top: 2px; padding: 0 3px; border-radius: 4px; }
+.cal-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.cal-legend .li { display: flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--text-dim); }
+.cal-legend .dot { width: 12px; height: 12px; border-radius: 4px; }
+
+.streak-row { display: flex; gap: 10px; margin-bottom: 12px; }
+.stat-tile { flex: 1; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; text-align: center; }
+.stat-tile .v { font-size: 1.5rem; font-weight: 800; }
+.stat-tile .l { font-size: .72rem; color: var(--text-dim); margin-top: 2px; }
+
+/* ---------- Chart ---------- */
+.chart-wrap { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; }
+.chart-wrap .c-title { font-size: .82rem; color: var(--text-dim); font-weight: 650; margin-bottom: 8px; display:flex; justify-content: space-between; }
+svg.chart { width: 100%; height: 140px; display: block; }
+.chart-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.chart-area { fill: url(#grad); opacity: .18; }
+.chart-dot { fill: var(--accent); }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-lbl { fill: var(--text-dim2); font-size: 9px; }
+
+table.hist { width: 100%; border-collapse: collapse; font-size: .84rem; }
+table.hist th, table.hist td { padding: 7px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+table.hist th { color: var(--text-dim2); font-size: .72rem; text-transform: uppercase; font-weight: 700; }
+table.hist td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- Toast ---------- */
+#toastRoot { position: fixed; bottom: calc(var(--tabbar-h) + var(--safe-b) + 74px); left: 0; right: 0; z-index: 120; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+.toast { background: var(--bg-elev2); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 9px 16px; font-size: .88rem; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.4); animation: fade .2s; }
+@keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; } }
+
+.drag-handle { cursor: grab; color: var(--text-dim2); font-size: 1.2rem; padding: 0 2px; touch-action: none; }
+.dragging { opacity: .5; }
+
+hr.sep { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+a { color: var(--accent); }
+
+</style>
+</head>
+<body>
+  <header id="topbar">
+    <button id="backBtn" class="icon-btn" aria-label="Zurück" hidden>‹</button>
+    <h1 id="title">Training</h1>
+    <div id="topActions"></div>
+  </header>
+
+  <main id="app"><!-- views render here --></main>
+
+  <nav id="tabbar">
+    <a href="#/" class="tab" data-tab="home"><span class="tico">🏠</span><span>Start</span></a>
+    <a href="#/plans" class="tab" data-tab="plans"><span class="tico">📋</span><span>Pläne</span></a>
+    <a href="#/calendar" class="tab" data-tab="calendar"><span class="tico">📅</span><span>Kalender</span></a>
+    <a href="#/stats" class="tab" data-tab="stats"><span class="tico">📈</span><span>Statistik</span></a>
+    <a href="#/library" class="tab" data-tab="library"><span class="tico">📚</span><span>Übungen</span></a>
+  </nav>
+
+  <div id="modalRoot"></div>
+  <div id="toastRoot"></div>
+
+  <script>
+const DB = (() => {
+// ============================================================
+//  db.js – lokale Datenhaltung (localStorage) + CRUD + Statistik
+//  Hierarchie:  Ort -> Trainingsplan -> Trainingstag -> Übungen
+//  Übungen stammen aus der wiederverwendbaren Übungsbibliothek.
+// ============================================================
+
+const KEY = 'trainingsplan.v1';
+
+const DEFAULTS = () => ({
+  version: 1,
+  settings: { defaultRestSec: 90, soundOnRestEnd: true },
+  exercises: [],   // Bibliothek: {id,name,category,muscles[],notes,unit,createdAt}
+  locations: [],   // Orte:        {id,name,emoji,color,createdAt}
+  plans: [],       // Pläne:       {id,locationId,name,emoji,color,createdAt}
+  days: [],        // Trainingstage:{id,planId,name,emoji,color,order,exercises:[{id,exerciseId,sets,reps,restSec}],createdAt}
+  sessions: [],    // Einheiten:   {id,locationId,planId,dayId,dayName,date,startedAt,finishedAt,emoji,color,note,entries:[...]}
+});
+
+let store = null;
+
+// ---------- Basis ----------
+function db() {
+  if (store) return store;
+  try {
+    const raw = localStorage.getItem(KEY);
+    store = raw ? JSON.parse(raw) : DEFAULTS();
+  } catch (e) {
+    console.error('Konnte Daten nicht laden, starte leer', e);
+    store = DEFAULTS();
+  }
+  // Felder absichern (Migration/Robustheit)
+  const d = DEFAULTS();
+  for (const k of Object.keys(d)) if (store[k] === undefined) store[k] = d[k];
+  store.settings = Object.assign(d.settings, store.settings || {});
+  return store;
+}
+
+function save() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(store));
+  } catch (e) {
+    console.error('Speichern fehlgeschlagen', e);
+    alert('Speichern fehlgeschlagen – evtl. ist der Speicher voll.');
+  }
+}
+
+function uid(p = 'id') {
+  return p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// ---------- Übungsbibliothek ----------
+function exercises() { return db().exercises.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')); }
+function getExercise(id) { return db().exercises.find(e => e.id === id) || null; }
+function addExercise(data) {
+  const ex = { id: uid('ex'), name: '', category: '', muscles: [], notes: '', unit: 'kg', createdAt: Date.now(), ...data };
+  db().exercises.push(ex); save(); return ex;
+}
+function updateExercise(id, patch) {
+  const ex = getExercise(id); if (!ex) return; Object.assign(ex, patch); save(); return ex;
+}
+function deleteExercise(id) {
+  const d = db();
+  d.exercises = d.exercises.filter(e => e.id !== id);
+  // Aus Trainingstagen entfernen
+  d.days.forEach(day => { day.exercises = day.exercises.filter(x => x.exerciseId !== id); });
+  save();
+}
+// Wie oft wurde eine Übung in Einheiten genutzt (für Löschwarnung)
+function exerciseUsage(id) {
+  return db().sessions.filter(s => (s.entries || []).some(e => e.exerciseId === id)).length;
+}
+
+// ---------- Orte ----------
+function locations() { return db().locations.slice(); }
+function getLocation(id) { return db().locations.find(l => l.id === id) || null; }
+function addLocation(data) {
+  const l = { id: uid('loc'), name: '', emoji: '📍', color: '#6c8cff', createdAt: Date.now(), ...data };
+  db().locations.push(l); save(); return l;
+}
+function updateLocation(id, patch) { const l = getLocation(id); if (l) { Object.assign(l, patch); save(); } return l; }
+function deleteLocation(id) {
+  const d = db();
+  const planIds = d.plans.filter(p => p.locationId === id).map(p => p.id);
+  d.plans = d.plans.filter(p => p.locationId !== id);
+  d.days = d.days.filter(day => !planIds.includes(day.planId));
+  d.locations = d.locations.filter(l => l.id !== id);
+  save();
+}
+
+// ---------- Pläne ----------
+function plansByLocation(locId) { return db().plans.filter(p => p.locationId === locId); }
+function getPlan(id) { return db().plans.find(p => p.id === id) || null; }
+function addPlan(data) {
+  const p = { id: uid('plan'), locationId: null, name: '', emoji: '🏋️', color: '#6c8cff', createdAt: Date.now(), ...data };
+  db().plans.push(p); save(); return p;
+}
+function updatePlan(id, patch) { const p = getPlan(id); if (p) { Object.assign(p, patch); save(); } return p; }
+function deletePlan(id) {
+  const d = db();
+  d.days = d.days.filter(day => day.planId !== id);
+  d.plans = d.plans.filter(p => p.id !== id);
+  save();
+}
+
+// ---------- Trainingstage ----------
+function daysByPlan(planId) {
+  return db().days.filter(day => day.planId === planId).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+function getDay(id) { return db().days.find(day => day.id === id) || null; }
+function addDay(data) {
+  const order = daysByPlan(data.planId).length;
+  const day = { id: uid('day'), planId: null, name: '', emoji: '💪', color: '#46c98b', order, exercises: [], createdAt: Date.now(), ...data };
+  db().days.push(day); save(); return day;
+}
+function updateDay(id, patch) { const day = getDay(id); if (day) { Object.assign(day, patch); save(); } return day; }
+function deleteDay(id) { const d = db(); d.days = d.days.filter(day => day.id !== id); save(); }
+function reorderDays(planId, orderedIds) {
+  orderedIds.forEach((id, i) => { const day = getDay(id); if (day) day.order = i; });
+  save();
+}
+
+// Übung innerhalb eines Trainingstags
+function addExerciseToDay(dayId, exerciseId, opts = {}) {
+  const day = getDay(dayId); if (!day) return;
+  const item = { id: uid('de'), exerciseId, sets: opts.sets ?? 3, reps: opts.reps ?? 10, restSec: opts.restSec ?? db().settings.defaultRestSec };
+  day.exercises.push(item); save(); return item;
+}
+function updateDayExercise(dayId, itemId, patch) {
+  const day = getDay(dayId); if (!day) return;
+  const it = day.exercises.find(x => x.id === itemId); if (it) { Object.assign(it, patch); save(); }
+  return it;
+}
+function removeDayExercise(dayId, itemId) {
+  const day = getDay(dayId); if (!day) return;
+  day.exercises = day.exercises.filter(x => x.id !== itemId); save();
+}
+function reorderDayExercises(dayId, orderedItemIds) {
+  const day = getDay(dayId); if (!day) return;
+  day.exercises.sort((a, b) => orderedItemIds.indexOf(a.id) - orderedItemIds.indexOf(b.id));
+  save();
+}
+
+// ---------- Einheiten (Sessions / durchgeführtes Training) ----------
+function sessions() {
+  return db().sessions.slice().sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+}
+function getSession(id) { return db().sessions.find(s => s.id === id) || null; }
+
+// Neue Einheit aus einem Trainingstag erzeugen (mit Zielwerten vorbefüllt)
+function startSession(dayId) {
+  const day = getDay(dayId); if (!day) return null;
+  const plan = getPlan(day.planId);
+  const loc = plan ? getLocation(plan.locationId) : null;
+  const entries = day.exercises.map(item => {
+    const ex = getExercise(item.exerciseId);
+    const sets = [];
+    for (let i = 0; i < (item.sets || 1); i++) sets.push({ weight: '', reps: '', done: false });
+    return {
+      exerciseId: item.exerciseId,
+      name: ex ? ex.name : '(gelöschte Übung)',
+      unit: ex ? (ex.unit || 'kg') : 'kg',
+      targetReps: item.reps,
+      targetSets: item.sets,
+      restSec: item.restSec,
+      sets,
+    };
+  });
+  const now = Date.now();
+  const s = {
+    id: uid('ses'),
+    locationId: loc ? loc.id : null,
+    planId: plan ? plan.id : null,
+    dayId: day.id,
+    dayName: day.name,
+    date: todayISO(),
+    startedAt: now,
+    finishedAt: null,
+    emoji: day.emoji || plan?.emoji || '💪',
+    color: day.color || plan?.color || '#46c98b',
+    note: '',
+    entries,
+  };
+  db().sessions.push(s); save(); return s;
+}
+function updateSession(id, patch) { const s = getSession(id); if (s) { Object.assign(s, patch); save(); } return s; }
+function deleteSession(id) { const d = db(); d.sessions = d.sessions.filter(s => s.id !== id); save(); }
+
+// Letzte abgeschlossene Sätze einer Übung VOR einer bestimmten Einheit (für "letztes Mal")
+function lastEntryFor(exerciseId, beforeSessionId = null) {
+  const all = sessions(); // absteigend nach startedAt
+  const current = beforeSessionId ? getSession(beforeSessionId) : null;
+  const cutoff = current ? current.startedAt : Infinity;
+  for (const s of all) {
+    if (s.id === beforeSessionId) continue;
+    if ((s.startedAt || 0) >= cutoff) continue;
+    const e = (s.entries || []).find(en => en.exerciseId === exerciseId && (en.sets || []).some(hasData));
+    if (e) return { session: s, entry: e };
+  }
+  return null;
+}
+
+// ---------- Hilfen für Sätze ----------
+function hasData(set) {
+  return set && (num(set.weight) > 0 || num(set.reps) > 0);
+}
+function isWorkingDone(set) {
+  return set && set.done && num(set.reps) > 0;
+}
+function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+
+// Epley-Formel für geschätztes 1RM
+function epley1RM(weight, reps) {
+  const w = num(weight), r = num(reps);
+  if (w <= 0 || r <= 0) return 0;
+  if (r === 1) return w;
+  return w * (1 + r / 30);
+}
+
+// ---------- Statistik je Übung ----------
+// Liefert je Einheit (chronologisch aufsteigend) aggregierte Kennzahlen.
+function exerciseHistory(exerciseId) {
+  const rows = [];
+  for (const s of db().sessions) {
+    const entries = (s.entries || []).filter(e => e.exerciseId === exerciseId);
+    if (!entries.length) continue;
+    const workSets = [];
+    entries.forEach(e => (e.sets || []).forEach(set => { if (isWorkingDone(set)) workSets.push(set); }));
+    if (!workSets.length) continue;
+    let volume = 0, maxWeight = 0, best1rm = 0, bestSet = null, totalReps = 0;
+    workSets.forEach(set => {
+      const w = num(set.weight), r = num(set.reps);
+      volume += w * r;
+      totalReps += r;
+      if (w > maxWeight) maxWeight = w;
+      const e1 = epley1RM(w, r);
+      if (e1 > best1rm) { best1rm = e1; bestSet = { weight: w, reps: r }; }
+    });
+    rows.push({
+      sessionId: s.id,
+      date: s.date,
+      startedAt: s.startedAt || 0,
+      sets: workSets.map(x => ({ weight: num(x.weight), reps: num(x.reps) })),
+      setCount: workSets.length,
+      totalReps,
+      volume: Math.round(volume),
+      maxWeight,
+      est1rm: Math.round(best1rm * 10) / 10,
+      bestSet,
+    });
+  }
+  rows.sort((a, b) => a.startedAt - b.startedAt);
+  return rows;
+}
+
+// Persönliche Rekorde je Übung
+function exercisePRs(exerciseId) {
+  const hist = exerciseHistory(exerciseId);
+  const pr = { maxWeight: 0, best1rm: 0, maxVolume: 0, maxReps: 0, sessionsCount: hist.length, lastDate: null, firstDate: null };
+  hist.forEach(r => {
+    if (r.maxWeight > pr.maxWeight) pr.maxWeight = r.maxWeight;
+    if (r.est1rm > pr.best1rm) pr.best1rm = r.est1rm;
+    if (r.volume > pr.maxVolume) pr.maxVolume = r.volume;
+    r.sets.forEach(s => { if (s.reps > pr.maxReps) pr.maxReps = s.reps; });
+  });
+  if (hist.length) { pr.firstDate = hist[0].date; pr.lastDate = hist[hist.length - 1].date; }
+  return pr;
+}
+
+// ---------- Kalender ----------
+// Map: 'YYYY-MM-DD' -> [ {emoji,color,name,sessionId} ... ]
+function sessionsByDate() {
+  const map = {};
+  for (const s of db().sessions) {
+    const key = s.date;
+    (map[key] ||= []).push({ emoji: s.emoji, color: s.color, name: s.dayName || 'Training', sessionId: s.id });
+  }
+  return map;
+}
+
+// ---------- Export / Import ----------
+function exportData() {
+  return JSON.stringify(db(), null, 2);
+}
+function importData(json, mode = 'replace') {
+  const incoming = typeof json === 'string' ? JSON.parse(json) : json;
+  if (!incoming || typeof incoming !== 'object') throw new Error('Ungültige Datei');
+  if (mode === 'replace') {
+    store = Object.assign(DEFAULTS(), incoming);
+  } else { // merge
+    const d = db();
+    ['exercises', 'locations', 'plans', 'days', 'sessions'].forEach(k => {
+      const existing = new Set(d[k].map(x => x.id));
+      (incoming[k] || []).forEach(x => { if (!existing.has(x.id)) d[k].push(x); });
+    });
+  }
+  save();
+}
+function wipeAll() { store = DEFAULTS(); save(); }
+
+// ---------- Datum ----------
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+  return { db, save, uid, exercises, getExercise, addExercise, updateExercise, deleteExercise, exerciseUsage, locations, getLocation, addLocation, updateLocation, deleteLocation, plansByLocation, getPlan, addPlan, updatePlan, deletePlan, daysByPlan, getDay, addDay, updateDay, deleteDay, reorderDays, addExerciseToDay, updateDayExercise, removeDayExercise, reorderDayExercises, sessions, getSession, startSession, updateSession, deleteSession, lastEntryFor, hasData, isWorkingDone, num, epley1RM, exerciseHistory, exercisePRs, sessionsByDate, exportData, importData, wipeAll, todayISO };
+})();
+
+// ============================================================
+//  app.js – UI, Router und alle Ansichten
+// ============================================================
+// ---------- DOM-Kurzformen ----------
+const appEl = document.getElementById('app');
+const titleEl = document.getElementById('title');
+const backBtn = document.getElementById('backBtn');
+const topActions = document.getElementById('topActions');
+const modalRoot = document.getElementById('modalRoot');
+const toastRoot = document.getElementById('toastRoot');
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function el(tag, props = {}, children = []) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') n.className = v;
+    else if (k === 'html') n.innerHTML = v;
+    else if (k.startsWith('on') && typeof v === 'function') n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) n.setAttribute(k, v);
+  }
+  (Array.isArray(children) ? children : [children]).forEach(c => { if (c != null) n.append(c.nodeType ? c : document.createTextNode(c)); });
+  return n;
+}
+
+function toast(msg) {
+  const t = el('div', { class: 'toast' }, msg);
+  toastRoot.append(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 250); }, 1900);
+}
+
+// ---------- Datum ----------
+const WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+function parseISO(iso) { const [y, m, d] = String(iso).split('-').map(Number); return new Date(y, (m || 1) - 1, d || 1); }
+function fmtDate(iso) { const d = parseISO(iso); return `${WD[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`; }
+function fmtShort(iso) { const d = parseISO(iso); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.`; }
+function fmtWeight(n) { const v = Math.round(n * 100) / 100; return (Number.isInteger(v) ? v : v.toFixed(1)).toString(); }
+function setSummary(sets) {
+  return sets.filter(DB.hasData).map(s => `${fmtWeight(DB.num(s.weight))}×${DB.num(s.reps)}`).join(' · ');
+}
+
+// ---------- Symbol- / Farb-Picker ----------
+const EMOJI_SETS = {
+  location: ['📍', '🏋️', '🏠', '🏢', '🌳', '🏟️', '🧗', '🚴', '🏊', '⛰️'],
+  plan: ['🏋️', '💪', '🔥', '⚡', '🎯', '🦵', '🫀', '🅿️', '🅾️', '🔄'],
+  day: ['💪', '🦵', '🫁', '🔙', '🔛', '🅰️', '🅱️', '🔴', '🟢', '🔵', '🟡', '🟣', '❤️', '🖤'],
+};
+const COLORS = ['#6c8cff', '#46c98b', '#ffb454', '#ff6b6b', '#c77dff', '#4cc9f0', '#f72585', '#adb5bd'];
+
+function symbolField(current, kind) {
+  const set = EMOJI_SETS[kind] || EMOJI_SETS.day;
+  return `
+    <label class="field"><span>Kürzel oder Emoji (für Kalender)</span>
+      <input id="f-emoji" maxlength="4" value="${esc(current || '')}" placeholder="z.B. 💪 oder PU" />
+    </label>
+    <div class="emoji-pick" id="f-emoji-pick">
+      ${set.map(e => `<button type="button" data-e="${e}" class="${e === current ? 'sel' : ''}">${e}</button>`).join('')}
+    </div>`;
+}
+function colorField(current) {
+  return `<label class="field"><span>Farbe</span></label>
+    <div class="color-pick" id="f-color-pick">
+      ${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c}" class="${c === current ? 'sel' : ''}"></button>`).join('')}
+    </div>`;
+}
+function wireSymbolColor(root) {
+  const emojiInput = $('#f-emoji', root);
+  $$('#f-emoji-pick button', root).forEach(b => b.addEventListener('click', () => {
+    if (emojiInput) emojiInput.value = b.dataset.e;
+    $$('#f-emoji-pick button', root).forEach(x => x.classList.remove('sel'));
+    b.classList.add('sel');
+  }));
+  let color = ($('#f-color-pick .sel', root)?.dataset.c) || COLORS[0];
+  $$('#f-color-pick button', root).forEach(b => b.addEventListener('click', () => {
+    color = b.dataset.c;
+    $$('#f-color-pick button', root).forEach(x => x.classList.remove('sel'));
+    b.classList.add('sel');
+  }));
+  return { getEmoji: () => (emojiInput?.value.trim() || ''), getColor: () => color };
+}
+
+// ---------- Modal ----------
+function openModal({ title, body, onMount, footer }) {
+  const back = el('div', { class: 'modal-back' });
+  const modal = el('div', { class: 'modal' });
+  modal.innerHTML = `<h2>${esc(title)}</h2><div class="modal-body">${body}</div>`;
+  if (footer) { const f = el('div', { class: 'btn-row', style: 'margin-top:16px' }); f.innerHTML = footer; modal.append(f); }
+  back.append(modal);
+  back.addEventListener('click', e => { if (e.target === back) close(); });
+  modalRoot.append(back);
+  function close() { back.remove(); }
+  if (onMount) onMount(modal, close);
+  return close;
+}
+
+function confirmDialog(msg, { danger = false, okText = 'OK' } = {}) {
+  return new Promise(resolve => {
+    const close = openModal({
+      title: 'Bestätigen',
+      body: `<p style="margin:0 0 4px">${esc(msg)}</p>`,
+      footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn ${danger ? 'danger' : 'primary'}" data-ok>${esc(okText)}</button>`,
+      onMount: (m, c) => {
+        $('[data-x]', m).onclick = () => { c(); resolve(false); };
+        $('[data-ok]', m).onclick = () => { c(); resolve(true); };
+      },
+    });
+  });
+}
+
+// ---------- Chrome (Topbar) ----------
+function setChrome({ title, back = false, actions = [] }) {
+  titleEl.textContent = title;
+  backBtn.hidden = !back;
+  topActions.innerHTML = '';
+  actions.forEach(a => topActions.append(a));
+}
+backBtn.addEventListener('click', () => history.back());
+
+function actionBtn(label, onClick, cls = '') {
+  return el('button', { class: 'icon-btn ' + cls, onclick: onClick, 'aria-label': label }, label);
+}
+
+// ============================================================
+//  Router
+// ============================================================
+const routes = [];
+function route(pattern, handler) {
+  const keys = [];
+  const rx = new RegExp('^' + pattern.replace(/:[^/]+/g, m => { keys.push(m.slice(1)); return '([^/]+)'; }) + '$');
+  routes.push({ rx, keys, handler });
+}
+
+function navigate(hash) { location.hash = hash; }
+
+function render() {
+  const hash = location.hash.replace(/^#/, '') || '/';
+  for (const r of routes) {
+    const m = hash.match(r.rx);
+    if (m) {
+      const params = {};
+      r.keys.forEach((k, i) => params[k] = decodeURIComponent(m[i + 1]));
+      window.scrollTo(0, 0);
+      try { r.handler(params); } catch (e) { console.error(e); appEl.innerHTML = `<div class="empty">Fehler: ${esc(e.message)}</div>`; }
+      updateTabs(hash);
+      return;
+    }
+  }
+  navigate('/');
+}
+function updateTabs(hash) {
+  const map = { '/': 'home', '/plans': 'plans', '/calendar': 'calendar', '/stats': 'stats', '/library': 'library' };
+  let active = 'home';
+  if (hash.startsWith('/plans') || hash.startsWith('/location') || hash.startsWith('/plan') || hash.startsWith('/day')) active = 'plans';
+  else if (hash.startsWith('/calendar')) active = 'calendar';
+  else if (hash.startsWith('/stats')) active = 'stats';
+  else if (hash.startsWith('/library') || hash.startsWith('/exercise')) active = 'library';
+  else if (hash.startsWith('/train') || hash === '/' || hash.startsWith('/history')) active = 'home';
+  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === active));
+}
+window.addEventListener('hashchange', render);
+
+// ============================================================
+//  Ansicht: Start / Home
+// ============================================================
+route('/', () => {
+  setChrome({ title: 'Training', back: false });
+  const unfinished = DB.sessions().filter(s => !s.finishedAt);
+  const locs = DB.locations();
+  const recent = DB.sessions().filter(s => s.finishedAt).slice(0, 3);
+  const totalDays = DB.db().days.length;
+
+  let html = '';
+
+  if (unfinished.length) {
+    html += `<div class="section-title">Laufendes Training</div>`;
+    unfinished.forEach(s => {
+      const doneSets = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).length, 0);
+      html += `<div class="card tap" data-goto="/train/${s.id}">
+        <div class="train-head">
+          <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '💪')}</div>
+          <div style="flex:1">
+            <div style="font-weight:700">${esc(s.dayName || 'Training')}</div>
+            <div class="tiny muted">${fmtDate(s.date)} · ${doneSets} Sätze erledigt</div>
+          </div>
+          <span class="btn primary sm">Weiter ›</span>
+        </div>
+      </div>`;
+    });
+  }
+
+  html += `<div class="section-title">Schnellstart</div>`;
+  if (!totalDays) {
+    html += `<div class="empty">
+      <div class="big">🏋️</div>
+      <div>Noch keine Trainingstage angelegt.</div>
+      <div class="tiny" style="margin:8px 0 14px">Lege zuerst einen Ort, einen Plan und Trainingstage an.</div>
+      <a class="btn primary" href="#/plans">Jetzt einrichten</a>
+    </div>`;
+  } else {
+    locs.forEach(loc => {
+      const plans = DB.plansByLocation(loc.id);
+      const daysInLoc = plans.flatMap(p => DB.daysByPlan(p.id));
+      if (!daysInLoc.length) return;
+      html += `<div class="card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:1.2rem">${esc(loc.emoji)}</span><b>${esc(loc.name)}</b>
+        </div>`;
+      plans.forEach(p => {
+        const days = DB.daysByPlan(p.id);
+        if (!days.length) return;
+        html += `<div class="tiny muted" style="margin:6px 0 4px">${esc(p.emoji)} ${esc(p.name)}</div>`;
+        days.forEach(day => {
+          html += `<div class="list-row" data-start="${day.id}" style="margin-bottom:8px">
+            <div class="chip" style="background:${esc(day.color)}22;color:${esc(day.color)}">${esc(day.emoji)}</div>
+            <div class="grow"><div class="r-title">${esc(day.name)}</div>
+              <div class="r-sub">${day.exercises.length} Übungen</div></div>
+            <span class="btn good sm">Start ▶</span>
+          </div>`;
+        });
+      });
+      html += `</div>`;
+    });
+  }
+
+  if (recent.length) {
+    html += `<div class="section-title" style="display:flex;justify-content:space-between">
+      <span>Zuletzt</span><a href="#/history" class="tiny">alle ›</a></div>`;
+    recent.forEach(s => { html += sessionRow(s); });
+  }
+
+  appEl.innerHTML = html;
+
+  $$('[data-goto]', appEl).forEach(n => n.onclick = () => navigate(n.dataset.goto));
+  $$('[data-start]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); startTraining(n.dataset.start); });
+  $$('[data-session]', appEl).forEach(n => n.onclick = () => navigate('/train/' + n.dataset.session));
+});
+
+function sessionRow(s) {
+  const totalSets = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).length, 0);
+  const vol = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).reduce((x, st) => x + DB.num(st.weight) * DB.num(st.reps), 0), 0);
+  return `<div class="list-row" data-session="${s.id}">
+    <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '💪')}</div>
+    <div class="grow"><div class="r-title">${esc(s.dayName || 'Training')}</div>
+      <div class="r-sub">${fmtDate(s.date)} · ${totalSets} Sätze · ${fmtWeight(vol)} kg Vol.</div></div>
+    <span class="arrow">›</span></div>`;
+}
+
+function startTraining(dayId) {
+  const s = DB.startSession(dayId);
+  if (s) navigate('/train/' + s.id);
+}
+
+// ============================================================
+//  Ansicht: Pläne (Orte-Übersicht)
+// ============================================================
+route('/plans', () => {
+  setChrome({ title: 'Orte & Pläne', back: false, actions: [actionBtn('⚙️', () => navigate('/settings'))] });
+  const locs = DB.locations();
+  let html = '';
+  if (!locs.length) {
+    html += `<div class="empty"><div class="big">📍</div><div>Noch keine Trainingsorte.</div>
+      <div class="tiny" style="margin:8px 0 0">Ein Ort ist z.B. „Fitnessstudio" oder „Zuhause".</div></div>`;
+  } else {
+    locs.forEach(loc => {
+      const plans = DB.plansByLocation(loc.id);
+      html += `<div class="list-row" data-loc="${loc.id}">
+        <div class="chip" style="background:${esc(loc.color)}22;color:${esc(loc.color)}">${esc(loc.emoji)}</div>
+        <div class="grow"><div class="r-title">${esc(loc.name)}</div>
+          <div class="r-sub">${plans.length} ${plans.length === 1 ? 'Plan' : 'Pläne'}</div></div>
+        <span class="arrow">›</span></div>`;
+    });
+  }
+  appEl.innerHTML = html;
+  $$('[data-loc]', appEl).forEach(n => n.onclick = () => navigate('/location/' + n.dataset.loc));
+
+  const fab = el('button', { class: 'fab', onclick: () => editLocationModal(null) }, '+');
+  appEl.append(fab);
+});
+
+function editLocationModal(id) {
+  const loc = id ? DB.getLocation(id) : { name: '', emoji: '📍', color: COLORS[0] };
+  openModal({
+    title: id ? 'Ort bearbeiten' : 'Neuer Ort',
+    body: `
+      <label class="field"><span>Name</span><input id="f-name" value="${esc(loc.name)}" placeholder="z.B. Fitnessstudio" /></label>
+      ${symbolField(loc.emoji, 'location')}
+      ${colorField(loc.color)}`,
+    footer: `${id ? '<button class="btn danger" data-del>Löschen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      const sc = wireSymbolColor(m);
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        const name = $('#f-name', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        const data = { name, emoji: sc.getEmoji() || '📍', color: sc.getColor() };
+        if (id) DB.updateLocation(id, data); else DB.addLocation(data);
+        close(); render();
+      };
+      const del = $('[data-del]', m);
+      if (del) del.onclick = async () => {
+        if (await confirmDialog('Ort inkl. aller Pläne und Trainingstage löschen? (Aufgezeichnete Einheiten bleiben erhalten)', { danger: true, okText: 'Löschen' })) {
+          DB.deleteLocation(id); close(); navigate('/plans');
+        }
+      };
+    },
+  });
+}
+
+// ============================================================
+//  Ansicht: Ort-Detail (Pläne des Orts)
+// ============================================================
+route('/location/:id', ({ id }) => {
+  const loc = DB.getLocation(id);
+  if (!loc) return navigate('/plans');
+  setChrome({ title: `${loc.emoji} ${loc.name}`, back: true, actions: [actionBtn('✏️', () => editLocationModal(id))] });
+  const plans = DB.plansByLocation(id);
+  let html = `<div class="section-title">Trainingspläne</div>`;
+  if (!plans.length) {
+    html += `<div class="empty"><div class="big">📋</div><div>Noch keine Pläne an diesem Ort.</div></div>`;
+  } else {
+    plans.forEach(p => {
+      const days = DB.daysByPlan(p.id);
+      html += `<div class="list-row" data-plan="${p.id}">
+        <div class="chip" style="background:${esc(p.color)}22;color:${esc(p.color)}">${esc(p.emoji)}</div>
+        <div class="grow"><div class="r-title">${esc(p.name)}</div>
+          <div class="r-sub">${days.length} Trainingstage</div></div>
+        <span class="arrow">›</span></div>`;
+    });
+  }
+  appEl.innerHTML = html;
+  $$('[data-plan]', appEl).forEach(n => n.onclick = () => navigate('/plan/' + n.dataset.plan));
+  appEl.append(el('button', { class: 'fab', onclick: () => editPlanModal(null, id) }, '+'));
+});
+
+function editPlanModal(id, locationId) {
+  const p = id ? DB.getPlan(id) : { name: '', emoji: '🏋️', color: COLORS[0], locationId };
+  openModal({
+    title: id ? 'Plan bearbeiten' : 'Neuer Plan',
+    body: `
+      <label class="field"><span>Name</span><input id="f-name" value="${esc(p.name)}" placeholder="z.B. Push / Pull / Legs" /></label>
+      ${symbolField(p.emoji, 'plan')}
+      ${colorField(p.color)}`,
+    footer: `${id ? '<button class="btn danger" data-del>Löschen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      const sc = wireSymbolColor(m);
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        const name = $('#f-name', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        const data = { name, emoji: sc.getEmoji() || '🏋️', color: sc.getColor() };
+        if (id) DB.updatePlan(id, data); else DB.addPlan({ ...data, locationId: p.locationId });
+        close(); render();
+      };
+      const del = $('[data-del]', m);
+      if (del) del.onclick = async () => {
+        if (await confirmDialog('Plan inkl. Trainingstage löschen?', { danger: true, okText: 'Löschen' })) {
+          const lid = p.locationId; DB.deletePlan(id); close(); navigate('/location/' + lid);
+        }
+      };
+    },
+  });
+}
+
+// ============================================================
+//  Ansicht: Plan-Detail (Trainingstage)
+// ============================================================
+route('/plan/:id', ({ id }) => {
+  const p = DB.getPlan(id);
+  if (!p) return navigate('/plans');
+  setChrome({ title: `${p.emoji} ${p.name}`, back: true, actions: [actionBtn('✏️', () => editPlanModal(id, p.locationId))] });
+  const days = DB.daysByPlan(id);
+  let html = `<div class="section-title">Trainingstage</div>`;
+  if (!days.length) {
+    html += `<div class="empty"><div class="big">💪</div><div>Noch keine Trainingstage.</div>
+      <div class="tiny" style="margin:8px 0 0">Ein Trainingstag ist z.B. „Push A" oder „Beine".</div></div>`;
+  } else {
+    days.forEach((day, i) => {
+      html += `<div class="list-row" data-day="${day.id}">
+        <div class="chip" style="background:${esc(day.color)}22;color:${esc(day.color)}">${esc(day.emoji)}</div>
+        <div class="grow"><div class="r-title">${esc(day.name)}</div>
+          <div class="r-sub">${day.exercises.length} Übungen</div></div>
+        <span class="mv" data-up="${day.id}" style="padding:4px 8px;color:var(--text-dim2)">▲</span>
+        <span class="mv" data-down="${day.id}" style="padding:4px 8px;color:var(--text-dim2)">▼</span>
+        <span class="arrow">›</span></div>`;
+    });
+  }
+  appEl.innerHTML = html;
+  $$('[data-day]', appEl).forEach(n => n.onclick = (e) => { if (e.target.closest('.mv')) return; navigate('/day/' + n.dataset.day); });
+  const ids = days.map(d => d.id);
+  $$('[data-up]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); moveInArray(ids, n.dataset.up, -1); DB.reorderDays(id, ids); render(); });
+  $$('[data-down]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); moveInArray(ids, n.dataset.down, +1); DB.reorderDays(id, ids); render(); });
+  appEl.append(el('button', { class: 'fab', onclick: () => editDayModal(null, id) }, '+'));
+});
+
+function moveInArray(arr, id, dir) {
+  const i = arr.indexOf(id); const j = i + dir;
+  if (i < 0 || j < 0 || j >= arr.length) return;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+}
+
+function editDayModal(id, planId) {
+  const day = id ? DB.getDay(id) : { name: '', emoji: '💪', color: COLORS[1], planId };
+  openModal({
+    title: id ? 'Trainingstag bearbeiten' : 'Neuer Trainingstag',
+    body: `
+      <label class="field"><span>Name</span><input id="f-name" value="${esc(day.name)}" placeholder="z.B. Push A / Beine" /></label>
+      ${symbolField(day.emoji, 'day')}
+      ${colorField(day.color)}`,
+    footer: `${id ? '<button class="btn danger" data-del>Löschen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      const sc = wireSymbolColor(m);
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        const name = $('#f-name', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        const data = { name, emoji: sc.getEmoji() || '💪', color: sc.getColor() };
+        if (id) { DB.updateDay(id, data); close(); render(); }
+        else { const nd = DB.addDay({ ...data, planId: day.planId }); close(); navigate('/day/' + nd.id); }
+      };
+      const del = $('[data-del]', m);
+      if (del) del.onclick = async () => {
+        if (await confirmDialog('Trainingstag löschen?', { danger: true, okText: 'Löschen' })) {
+          const pid = day.planId; DB.deleteDay(id); close(); navigate('/plan/' + pid);
+        }
+      };
+    },
+  });
+}
+
+// ============================================================
+//  Ansicht: Trainingstag-Detail (Übungen mit Zielwerten)
+// ============================================================
+route('/day/:id', ({ id }) => {
+  const day = DB.getDay(id);
+  if (!day) return navigate('/plans');
+  setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: [actionBtn('✏️', () => editDayModal(id, day.planId))] });
+
+  let html = `<button class="btn good block" id="startBtn" style="margin-bottom:16px">▶ Training starten</button>
+    <div class="section-title">Übungen</div>`;
+  if (!day.exercises.length) {
+    html += `<div class="empty"><div class="big">📚</div><div>Noch keine Übungen.</div>
+      <div class="tiny" style="margin:8px 0 0">Füge Übungen aus deiner Bibliothek hinzu.</div></div>`;
+  } else {
+    day.exercises.forEach((item, i) => {
+      const ex = DB.getExercise(item.exerciseId);
+      html += `<div class="card" data-item="${item.id}">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="grow" style="flex:1"><b>${esc(ex ? ex.name : '(gelöscht)')}</b>
+            <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh · Pause ${item.restSec}s</div></div>
+          <span class="mv" data-up="${item.id}" style="padding:4px 6px;color:var(--text-dim2)">▲</span>
+          <span class="mv" data-down="${item.id}" style="padding:4px 6px;color:var(--text-dim2)">▼</span>
+          <button class="btn ghost sm" data-edit="${item.id}">✏️</button>
+          <button class="btn ghost sm" data-rm="${item.id}">🗑️</button>
+        </div>
+      </div>`;
+    });
+  }
+  appEl.innerHTML = html;
+
+  $('#startBtn', appEl).onclick = () => {
+    if (!day.exercises.length) return toast('Erst Übungen hinzufügen');
+    startTraining(id);
+  };
+  const ids = day.exercises.map(x => x.id);
+  $$('[data-up]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.up, -1); DB.reorderDayExercises(id, ids); render(); });
+  $$('[data-down]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.down, +1); DB.reorderDayExercises(id, ids); render(); });
+  $$('[data-edit]', appEl).forEach(n => n.onclick = () => editDayExerciseModal(id, n.dataset.edit));
+  $$('[data-rm]', appEl).forEach(n => n.onclick = async () => {
+    if (await confirmDialog('Übung aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) { DB.removeDayExercise(id, n.dataset.rm); render(); }
+  });
+
+  appEl.append(el('button', { class: 'fab', onclick: () => pickExerciseModal(exId => {
+    DB.addExerciseToDay(id, exId); render();
+  }) }, '+'));
+});
+
+function editDayExerciseModal(dayId, itemId) {
+  const day = DB.getDay(dayId);
+  const item = day.exercises.find(x => x.id === itemId);
+  if (!item) return;
+  const ex = DB.getExercise(item.exerciseId);
+  openModal({
+    title: ex ? ex.name : 'Übung',
+    body: `
+      <div class="row3">
+        <label class="field"><span>Sätze</span><input id="f-sets" type="number" inputmode="numeric" min="1" value="${item.sets}" /></label>
+        <label class="field"><span>Wdh.</span><input id="f-reps" type="number" inputmode="numeric" min="1" value="${item.reps}" /></label>
+        <label class="field"><span>Pause (s)</span><input id="f-rest" type="number" inputmode="numeric" min="0" step="5" value="${item.restSec}" /></label>
+      </div>`,
+    footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        DB.updateDayExercise(dayId, itemId, {
+          sets: Math.max(1, parseInt($('#f-sets', m).value) || 1),
+          reps: Math.max(1, parseInt($('#f-reps', m).value) || 1),
+          restSec: Math.max(0, parseInt($('#f-rest', m).value) || 0),
+        });
+        close(); render();
+      };
+    },
+  });
+}
+
+// ============================================================
+//  Übungs-Auswahl / Bibliothek
+// ============================================================
+function pickExerciseModal(onPick) {
+  const list = DB.exercises();
+  const body = `
+    <input id="f-search" placeholder="Übung suchen …" style="margin-bottom:10px" />
+    <button class="btn primary block" id="newEx" style="margin-bottom:12px">+ Neue Übung anlegen</button>
+    <div id="exList"></div>`;
+  openModal({
+    title: 'Übung wählen',
+    body,
+    onMount: (m, close) => {
+      const listEl = $('#exList', m);
+      const draw = (q = '') => {
+        const items = list.filter(e => e.name.toLowerCase().includes(q.toLowerCase()));
+        listEl.innerHTML = items.length ? items.map(e =>
+          `<div class="list-row" data-pick="${e.id}"><div class="grow"><div class="r-title">${esc(e.name)}</div>
+            ${e.category ? `<div class="r-sub">${esc(e.category)}</div>` : ''}</div><span class="arrow">＋</span></div>`
+        ).join('') : `<div class="tiny muted center" style="padding:12px">Keine Übung gefunden.</div>`;
+        $$('[data-pick]', listEl).forEach(n => n.onclick = () => { close(); onPick(n.dataset.pick); });
+      };
+      draw();
+      $('#f-search', m).oninput = e => draw(e.target.value);
+      $('#newEx', m).onclick = () => { close(); editExerciseModal(null, newId => onPick(newId)); };
+    },
+  });
+}
+
+route('/library', () => {
+  setChrome({ title: 'Übungsbibliothek', back: false });
+  const list = DB.exercises();
+  let html = `<input id="libSearch" placeholder="Suchen …" style="margin-bottom:12px" />`;
+  if (!list.length) {
+    html += `<div class="empty"><div class="big">📚</div><div>Deine Bibliothek ist leer.</div>
+      <div class="tiny" style="margin:8px 0 0">Lege deine Übungen selbst an – sie sind in allen Plänen nutzbar.</div></div>`;
+  } else {
+    html += `<div id="libList"></div>`;
+  }
+  appEl.innerHTML = html;
+  const draw = (q = '') => {
+    const listEl = $('#libList', appEl);
+    if (!listEl) return;
+    const items = list.filter(e => e.name.toLowerCase().includes(q.toLowerCase()));
+    listEl.innerHTML = items.map(e => {
+      const uses = DB.exerciseUsage(e.id);
+      return `<div class="list-row" data-ex="${e.id}">
+        <div class="grow"><div class="r-title">${esc(e.name)}</div>
+          <div class="r-sub">${[e.category, e.muscles?.join(', ')].filter(Boolean).join(' · ') || 'keine Kategorie'} ${uses ? '· ' + uses + '× trainiert' : ''}</div></div>
+        <button class="btn ghost sm" data-edit="${e.id}">✏️</button>
+        <span class="arrow" data-stats="${e.id}">📈</span></div>`;
+    }).join('');
+    $$('[data-ex]', listEl).forEach(n => n.onclick = (ev) => {
+      if (ev.target.closest('[data-edit]')) return editExerciseModal(n.dataset.ex);
+      navigate('/stats/' + n.dataset.ex);
+    });
+  };
+  draw();
+  const search = $('#libSearch', appEl);
+  if (search) search.oninput = e => draw(e.target.value);
+  appEl.append(el('button', { class: 'fab', onclick: () => editExerciseModal(null) }, '+'));
+});
+
+function editExerciseModal(id, onSaved) {
+  const ex = id ? DB.getExercise(id) : { name: '', category: '', muscles: [], notes: '', unit: 'kg' };
+  const usage = id ? DB.exerciseUsage(id) : 0;
+  openModal({
+    title: id ? 'Übung bearbeiten' : 'Neue Übung',
+    body: `
+      <label class="field"><span>Name</span><input id="f-name" value="${esc(ex.name)}" placeholder="z.B. Bankdrücken" /></label>
+      <label class="field"><span>Kategorie (optional)</span><input id="f-cat" value="${esc(ex.category)}" placeholder="z.B. Brust, Langhantel" /></label>
+      <label class="field"><span>Muskelgruppen (Komma-getrennt, optional)</span><input id="f-mus" value="${esc((ex.muscles || []).join(', '))}" placeholder="Brust, Trizeps" /></label>
+      <label class="field"><span>Einheit</span>
+        <select id="f-unit"><option value="kg"${ex.unit === 'kg' ? ' selected' : ''}>kg</option><option value="lb"${ex.unit === 'lb' ? ' selected' : ''}>lb</option></select></label>
+      <label class="field"><span>Notiz (optional)</span><textarea id="f-notes" placeholder="Technik-Hinweise, Einstellung am Gerät …">${esc(ex.notes)}</textarea></label>`,
+    footer: `${id ? '<button class="btn danger" data-del>Löschen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        const name = $('#f-name', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        const data = {
+          name,
+          category: $('#f-cat', m).value.trim(),
+          muscles: $('#f-mus', m).value.split(',').map(s => s.trim()).filter(Boolean),
+          unit: $('#f-unit', m).value,
+          notes: $('#f-notes', m).value.trim(),
+        };
+        let savedId = id;
+        if (id) DB.updateExercise(id, data); else savedId = DB.addExercise(data).id;
+        close();
+        if (onSaved) onSaved(savedId); else render();
+      };
+      const del = $('[data-del]', m);
+      if (del) del.onclick = async () => {
+        const warn = usage ? `Diese Übung wurde ${usage}× trainiert. Beim Löschen bleiben die Einheiten erhalten, aber die Statistik ist nicht mehr erreichbar. Trotzdem löschen?` : 'Übung löschen?';
+        if (await confirmDialog(warn, { danger: true, okText: 'Löschen' })) { DB.deleteExercise(id); close(); render(); }
+      };
+    },
+  });
+}
+
+// ============================================================
+//  Ansicht: Aktives Training
+// ============================================================
+let restTimer = null;
+
+route('/train/:id', ({ id }) => {
+  const s = DB.getSession(id);
+  if (!s) return navigate('/');
+  const finished = !!s.finishedAt;
+  setChrome({ title: s.dayName || 'Training', back: true, actions: [actionBtn('🗑️', () => discardSession(id))] });
+
+  const container = el('div');
+  renderTrain(container, id);
+  appEl.innerHTML = '';
+  appEl.append(container);
+});
+
+function renderTrain(container, id) {
+  const s = DB.getSession(id);
+  if (!s) return;
+  const finished = !!s.finishedAt;
+
+  let html = `
+    <div class="card">
+      <div class="train-head">
+        <div class="chip" id="t-chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '💪')}</div>
+        <div style="flex:1">
+          <div style="font-weight:700">${esc(s.dayName || 'Training')}</div>
+          <input id="t-date" type="date" value="${esc(s.date)}" style="margin-top:6px;width:auto" />
+        </div>
+      </div>
+      <div class="row2" style="margin-top:10px">
+        <label class="field" style="margin:0"><span>Kürzel/Emoji (Kalender)</span><input id="t-emoji" maxlength="4" value="${esc(s.emoji || '')}" /></label>
+        <div>
+          <label class="field" style="margin:0"><span>Farbe</span></label>
+          <div class="color-pick" id="t-color">${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c};width:24px;height:24px" class="${c === s.color ? 'sel' : ''}"></button>`).join('')}</div>
+        </div>
+      </div>
+      <label class="field" style="margin:12px 0 0"><span>Notiz</span><textarea id="t-note" placeholder="z.B. gut drauf, Schulter zwickt …">${esc(s.note || '')}</textarea></label>
+    </div>
+    <div id="entries"></div>
+    <button class="btn block" id="addEx" style="margin-top:6px">+ Übung hinzufügen</button>
+    <hr class="sep" />
+    ${finished
+      ? `<button class="btn primary block" id="reopenBtn">Als „laufend" markieren</button>`
+      : `<button class="btn good block" id="finishBtn">✓ Training beenden</button>`}
+    <div style="height:20px"></div>
+  `;
+  container.innerHTML = html;
+
+  // Kopf-Felder
+  $('#t-date', container).onchange = e => DB.updateSession(id, { date: e.target.value });
+  $('#t-emoji', container).oninput = e => { DB.updateSession(id, { emoji: e.target.value.trim() }); $('#t-chip', container).textContent = e.target.value.trim() || '💪'; };
+  $('#t-note', container).oninput = e => DB.updateSession(id, { note: e.target.value });
+  $$('#t-color button', container).forEach(b => b.onclick = () => {
+    DB.updateSession(id, { color: b.dataset.c });
+    $$('#t-color button', container).forEach(x => x.classList.remove('sel')); b.classList.add('sel');
+    const chip = $('#t-chip', container); chip.style.background = b.dataset.c + '22'; chip.style.color = b.dataset.c;
+  });
+
+  renderEntries(container, id);
+
+  $('#addEx', container).onclick = () => pickExerciseModal(exId => {
+    const ex = DB.getExercise(exId);
+    const s2 = DB.getSession(id);
+    s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: 10, targetSets: 3, restSec: DB.db().settings.defaultRestSec, sets: [{ weight: '', reps: '', done: false }] });
+    DB.save(); renderTrain(container, id);
+  });
+
+  const finishBtn = $('#finishBtn', container);
+  if (finishBtn) finishBtn.onclick = async () => {
+    DB.updateSession(id, { finishedAt: Date.now() });
+    stopRest();
+    toast('Training gespeichert 💪');
+    navigate('/');
+  };
+  const reopenBtn = $('#reopenBtn', container);
+  if (reopenBtn) reopenBtn.onclick = () => { DB.updateSession(id, { finishedAt: null }); renderTrain(container, id); };
+}
+
+function renderEntries(container, id) {
+  const s = DB.getSession(id);
+  const wrap = $('#entries', container);
+  wrap.innerHTML = '';
+  s.entries.forEach((entry, ei) => {
+    const last = DB.lastEntryFor(entry.exerciseId, id);
+    const lastTxt = last ? setSummary(last.entry.sets) : '';
+    const block = el('div', { class: 'ex-block' });
+    block.innerHTML = `
+      <div class="ex-head">
+        <div class="ex-name">${esc(entry.name)}</div>
+        <button class="btn ghost sm" data-rest>⏱ ${entry.restSec}s</button>
+        <button class="btn ghost sm" data-rmex>🗑️</button>
+      </div>
+      ${lastTxt ? `<div class="ex-last">Letztes Mal (${fmtShort(last.session.date)}): <b>${esc(lastTxt)}</b></div>` : `<div class="ex-last">Erstes Mal – noch keine Vergleichsdaten</div>`}
+      <div class="ex-body">
+        <div class="set-head"><span>#</span><span>Gewicht</span><span>Wdh.</span><span>✓</span><span></span></div>
+        <div class="sets"></div>
+        <div class="ex-actions">
+          <button class="btn sm" data-addset>+ Satz</button>
+        </div>
+      </div>`;
+
+    const setsEl = $('.sets', block);
+    entry.sets.forEach((set, si) => {
+      const row = el('div', { class: 'set-row' + (set.done ? ' done' : '') });
+      row.innerHTML = `
+        <div class="setno">${si + 1}</div>
+        <input type="number" inputmode="decimal" step="0.5" placeholder="${last?.entry.sets[si] ? fmtWeight(DB.num(last.entry.sets[si].weight)) : (entry.unit || 'kg')}" value="${set.weight === '' ? '' : esc(set.weight)}" data-w />
+        <input type="number" inputmode="numeric" placeholder="${last?.entry.sets[si] ? DB.num(last.entry.sets[si].reps) : (entry.targetReps || '')}" value="${set.reps === '' ? '' : esc(set.reps)}" data-r />
+        <button class="set-check ${set.done ? 'on' : ''}" data-check>✓</button>
+        <button class="set-del" data-delset>✕</button>`;
+      $('[data-w]', row).oninput = e => { set.weight = e.target.value; DB.save(); };
+      $('[data-r]', row).oninput = e => { set.reps = e.target.value; DB.save(); };
+      $('[data-check]', row).onclick = () => {
+        set.done = !set.done;
+        if (set.done && (set.weight === '' || set.reps === '')) {
+          // Platzhalter (letztes Mal) übernehmen, falls leer
+          if (set.weight === '' && last?.entry.sets[si]) set.weight = DB.num(last.entry.sets[si].weight);
+          if (set.reps === '' && last?.entry.sets[si]) set.reps = DB.num(last.entry.sets[si].reps);
+        }
+        DB.save();
+        row.classList.toggle('done', set.done);
+        $('[data-check]', row).classList.toggle('on', set.done);
+        $('[data-w]', row).value = set.weight === '' ? '' : set.weight;
+        $('[data-r]', row).value = set.reps === '' ? '' : set.reps;
+        if (set.done) startRest(entry.restSec);
+      };
+      $('[data-delset]', row).onclick = () => { entry.sets.splice(si, 1); DB.save(); renderEntries(container, id); };
+      setsEl.append(row);
+    });
+
+    $('[data-addset]', block).onclick = () => {
+      const prev = entry.sets[entry.sets.length - 1];
+      entry.sets.push({ weight: prev ? prev.weight : '', reps: prev ? prev.reps : '', done: false });
+      DB.save(); renderEntries(container, id);
+    };
+    $('[data-rest]', block).onclick = () => editRestModal(entry, () => renderEntries(container, id));
+    $('[data-rmex]', block).onclick = async () => {
+      if (await confirmDialog('Übung aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
+        s.entries.splice(ei, 1); DB.save(); renderEntries(container, id);
+      }
+    };
+    wrap.append(block);
+  });
+}
+
+function editRestModal(entry, after) {
+  openModal({
+    title: 'Pausenzeit',
+    body: `<label class="field"><span>Pause zwischen den Sätzen (Sekunden)</span>
+      <input id="f-rest" type="number" inputmode="numeric" min="0" step="5" value="${entry.restSec}" /></label>
+      <div class="btn-row">
+        <button class="btn sm" data-preset="60">60s</button>
+        <button class="btn sm" data-preset="90">90s</button>
+        <button class="btn sm" data-preset="120">120s</button>
+        <button class="btn sm" data-preset="180">180s</button>
+      </div>`,
+    footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      $$('[data-preset]', m).forEach(b => b.onclick = () => { $('#f-rest', m).value = b.dataset.preset; });
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => { entry.restSec = Math.max(0, parseInt($('#f-rest', m).value) || 0); DB.save(); close(); after && after(); };
+    },
+  });
+}
+
+// ---------- Pausen-Timer ----------
+function ensureRestBar() {
+  let bar = document.getElementById('restBar');
+  if (!bar) {
+    bar = el('div', { class: 'restbar hidden', id: 'restBar' });
+    bar.innerHTML = `<span>⏱</span><span class="rt-time">0:00</span><button data-add>+30</button><button data-stop>Stop</button>`;
+    document.body.append(bar);
+    $('[data-add]', bar).onclick = () => { if (restTimer) { restTimer.remaining += 30; updateRestBar(); } };
+    $('[data-stop]', bar).onclick = stopRest;
+  }
+  return bar;
+}
+function fmtTimer(sec) { const m = Math.floor(sec / 60), s = Math.max(0, sec % 60); return `${m}:${String(s).padStart(2, '0')}`; }
+function updateRestBar() {
+  const bar = ensureRestBar();
+  if (!restTimer) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  $('.rt-time', bar).textContent = fmtTimer(restTimer.remaining);
+}
+function startRest(sec) {
+  if (!sec || sec <= 0) return;
+  stopRest();
+  restTimer = { remaining: sec, iv: null };
+  updateRestBar();
+  restTimer.iv = setInterval(() => {
+    restTimer.remaining--;
+    if (restTimer.remaining <= 0) { beep(); stopRest(); toast('Pause vorbei ▶'); }
+    else updateRestBar();
+  }, 1000);
+}
+function stopRest() {
+  if (restTimer?.iv) clearInterval(restTimer.iv);
+  restTimer = null;
+  const bar = document.getElementById('restBar');
+  if (bar) bar.classList.add('hidden');
+}
+function beep() {
+  if (!DB.db().settings.soundOnRestEnd) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.12;
+    o.start();
+    o.frequency.setValueAtTime(660, ctx.currentTime + 0.15);
+    setTimeout(() => { o.stop(); ctx.close(); }, 400);
+    if (navigator.vibrate) navigator.vibrate([200, 80, 200]);
+  } catch (e) { /* Audio evtl. blockiert */ }
+}
+
+function discardSession(id) {
+  confirmDialog('Dieses Training verwerfen und löschen?', { danger: true, okText: 'Verwerfen' }).then(ok => {
+    if (ok) { DB.deleteSession(id); stopRest(); navigate('/'); }
+  });
+}
+
+// ============================================================
+//  Ansicht: Verlauf
+// ============================================================
+route('/history', () => {
+  setChrome({ title: 'Verlauf', back: true });
+  const list = DB.sessions();
+  let html = '';
+  if (!list.length) html = `<div class="empty"><div class="big">📖</div><div>Noch keine Trainings aufgezeichnet.</div></div>`;
+  else {
+    let curMonth = '';
+    list.forEach(s => {
+      const d = parseISO(s.date); const mk = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+      if (mk !== curMonth) { curMonth = mk; html += `<div class="section-title">${mk}</div>`; }
+      html += sessionRow(s) + (s.finishedAt ? '' : ' ');
+    });
+  }
+  appEl.innerHTML = html;
+  $$('[data-session]', appEl).forEach(n => n.onclick = () => navigate('/train/' + n.dataset.session));
+});
+
+// ============================================================
+//  Ansicht: Kalender (Habit-Tracker)
+// ============================================================
+let calState = null;
+route('/calendar', () => {
+  setChrome({ title: 'Kalender', back: false });
+  const now = new Date();
+  if (!calState) calState = { y: now.getFullYear(), m: now.getMonth() };
+  drawCalendar();
+});
+
+function drawCalendar() {
+  const { y, m } = calState;
+  const byDate = DB.sessionsByDate();
+  const first = new Date(y, m, 1);
+  const startDow = (first.getDay() + 6) % 7; // Mo=0
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const todayKey = DB.todayISO();
+
+  // Kennzahlen
+  const monthCount = Object.keys(byDate).filter(k => { const d = parseISO(k); return d.getFullYear() === y && d.getMonth() === m; }).reduce((a, k) => a + byDate[k].length, 0);
+  const streak = currentStreak(byDate);
+  const totalSessions = DB.sessions().filter(s => s.finishedAt).length;
+
+  let cells = '';
+  const dows = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+  dows.forEach(d => cells += `<div class="cal-dow">${d}</div>`);
+  for (let i = 0; i < startDow; i++) cells += `<div class="cal-cell empty-cell"></div>`;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const evs = byDate[key] || [];
+    const isToday = key === todayKey;
+    const emojis = evs.slice(0, 3).map(e => e.emoji || '•').join('');
+    cells += `<div class="cal-cell ${isToday ? 'today' : ''}" data-date="${key}" ${evs.length ? '' : 'style="cursor:default"'}>
+      <span class="cal-day">${d}</span>
+      ${evs.length ? `<span class="cal-emojis">${esc(emojis)}</span>` : ''}
+    </div>`;
+  }
+
+  appEl.innerHTML = `
+    <div class="streak-row">
+      <div class="stat-tile"><div class="v">🔥 ${streak}</div><div class="l">Streak (Wochen)</div></div>
+      <div class="stat-tile"><div class="v">${monthCount}</div><div class="l">diesen Monat</div></div>
+      <div class="stat-tile"><div class="v">${totalSessions}</div><div class="l">gesamt</div></div>
+    </div>
+    <div class="card">
+      <div class="cal-head">
+        <button class="icon-btn" data-prev>‹</button>
+        <h2>${MONTHS[m]} ${y}</h2>
+        <button class="icon-btn" data-next>›</button>
+      </div>
+      <div class="cal-grid">${cells}</div>
+    </div>
+    <p class="tiny muted center">Jeder Trainingstag erscheint mit seinem Kürzel/Emoji – wie ein Habit-Tracker. Tippe auf einen Tag mit Eintrag.</p>
+  `;
+  $('[data-prev]', appEl).onclick = () => { calState.m--; if (calState.m < 0) { calState.m = 11; calState.y--; } drawCalendar(); };
+  $('[data-next]', appEl).onclick = () => { calState.m++; if (calState.m > 11) { calState.m = 0; calState.y++; } drawCalendar(); };
+  $$('[data-date]', appEl).forEach(n => n.onclick = () => {
+    const evs = byDate[n.dataset.date]; if (!evs || !evs.length) return;
+    dayDetailModal(n.dataset.date, evs);
+  });
+}
+
+function currentStreak(byDate) {
+  // Wochen-Streak: aufeinanderfolgende Kalenderwochen mit >=1 Training, rückwärts ab dieser Woche
+  const weeks = new Set();
+  Object.keys(byDate).forEach(k => weeks.add(isoWeekKey(parseISO(k))));
+  let streak = 0;
+  let cur = new Date();
+  // erlaube, dass diese Woche noch leer ist -> Streak zählt ab letzter trainierter Woche
+  let wk = isoWeekKey(cur);
+  if (!weeks.has(wk)) { cur.setDate(cur.getDate() - 7); wk = isoWeekKey(cur); if (!weeks.has(wk)) return 0; }
+  while (weeks.has(isoWeekKey(cur))) { streak++; cur.setDate(cur.getDate() - 7); }
+  return streak;
+}
+function isoWeekKey(d) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - dayNum + 3);
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((date - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+  return `${date.getUTCFullYear()}-W${week}`;
+}
+
+function dayDetailModal(dateKey, evs) {
+  openModal({
+    title: fmtDate(dateKey),
+    body: evs.map(e => `<div class="list-row" data-open="${e.sessionId}">
+      <div class="chip" style="background:${esc(e.color)}22;color:${esc(e.color)}">${esc(e.emoji || '💪')}</div>
+      <div class="grow"><div class="r-title">${esc(e.name)}</div></div><span class="arrow">›</span></div>`).join(''),
+    onMount: (m, close) => {
+      $$('[data-open]', m).forEach(n => n.onclick = () => { close(); navigate('/train/' + n.dataset.open); });
+    },
+  });
+}
+
+// ============================================================
+//  Ansicht: Statistik
+// ============================================================
+route('/stats', () => {
+  setChrome({ title: 'Statistik', back: false });
+  const list = DB.exercises().filter(e => DB.exerciseHistory(e.id).length > 0);
+  let html = `<p class="tiny muted">Wähle eine Übung für Verlauf, Rekorde und Trends.</p>`;
+  if (!list.length) {
+    html += `<div class="empty"><div class="big">📈</div><div>Noch keine Trainingsdaten.</div>
+      <div class="tiny" style="margin:8px 0 0">Zeichne ein paar Trainings auf – dann erscheinen hier Statistiken.</div></div>`;
+  } else {
+    list.forEach(e => {
+      const pr = DB.exercisePRs(e.id);
+      html += `<div class="list-row" data-ex="${e.id}">
+        <div class="grow"><div class="r-title">${esc(e.name)}</div>
+          <div class="r-sub">${pr.sessionsCount}× · Bestes 1RM ${fmtWeight(pr.best1rm)} kg · Max ${fmtWeight(pr.maxWeight)} kg</div></div>
+        <span class="arrow">›</span></div>`;
+    });
+  }
+  appEl.innerHTML = html;
+  $$('[data-ex]', appEl).forEach(n => n.onclick = () => navigate('/stats/' + n.dataset.ex));
+});
+
+route('/stats/:id', ({ id }) => {
+  const ex = DB.getExercise(id);
+  if (!ex) return navigate('/stats');
+  setChrome({ title: ex.name, back: true, actions: [actionBtn('✏️', () => editExerciseModal(id))] });
+  const hist = DB.exerciseHistory(id);
+  const pr = DB.exercisePRs(id);
+
+  if (!hist.length) {
+    appEl.innerHTML = `<div class="empty"><div class="big">📈</div><div>Noch keine aufgezeichneten Sätze für „${esc(ex.name)}".</div></div>`;
+    return;
+  }
+
+  const tiles = `
+    <div class="streak-row">
+      <div class="stat-tile"><div class="v">${fmtWeight(pr.best1rm)}</div><div class="l">Bestes e1RM (kg)</div></div>
+      <div class="stat-tile"><div class="v">${fmtWeight(pr.maxWeight)}</div><div class="l">Max Gewicht (kg)</div></div>
+    </div>
+    <div class="streak-row">
+      <div class="stat-tile"><div class="v">${fmtWeight(pr.maxVolume)}</div><div class="l">Max Volumen</div></div>
+      <div class="stat-tile"><div class="v">${pr.sessionsCount}</div><div class="l">Einheiten</div></div>
+    </div>`;
+
+  const e1rmChart = lineChart(hist.map(h => ({ y: h.est1rm, label: fmtShort(h.date) })), 'kg');
+  const volChart = lineChart(hist.map(h => ({ y: h.volume, label: fmtShort(h.date) })), '');
+  const wChart = lineChart(hist.map(h => ({ y: h.maxWeight, label: fmtShort(h.date) })), 'kg');
+
+  const rows = hist.slice().reverse().map(h => `<tr>
+    <td>${fmtShort(h.date)}</td>
+    <td>${h.setCount}</td>
+    <td class="num">${fmtWeight(h.maxWeight)}</td>
+    <td class="num">${h.bestSet ? fmtWeight(h.bestSet.weight) + '×' + h.bestSet.reps : '–'}</td>
+    <td class="num">${fmtWeight(h.est1rm)}</td>
+    <td class="num">${fmtWeight(h.volume)}</td>
+  </tr>`).join('');
+
+  appEl.innerHTML = `
+    ${tiles}
+    <div class="chart-wrap"><div class="c-title"><span>Geschätztes 1RM (Epley)</span><span>${fmtWeight(pr.best1rm)} kg</span></div>${e1rmChart}</div>
+    <div class="chart-wrap"><div class="c-title"><span>Max. Gewicht je Einheit</span><span>${fmtWeight(pr.maxWeight)} kg</span></div>${wChart}</div>
+    <div class="chart-wrap"><div class="c-title"><span>Volumen (kg gesamt)</span><span>${fmtWeight(pr.maxVolume)}</span></div>${volChart}</div>
+    <div class="section-title">Verlauf</div>
+    <div class="card" style="overflow-x:auto;padding:6px 10px">
+      <table class="hist">
+        <thead><tr><th>Datum</th><th>Sätze</th><th>Max</th><th>Bester Satz</th><th>e1RM</th><th>Vol.</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p class="tiny muted">e1RM = geschätztes Einwiederholungsmaximum (Epley-Formel). Nur abgehakte Sätze fließen in die Statistik ein.</p>
+  `;
+});
+
+// SVG-Liniendiagramm (ohne externe Bibliotheken)
+function lineChart(points, unit = '') {
+  const W = 320, H = 140, pad = { l: 30, r: 10, t: 12, b: 20 };
+  const pts = points.filter(p => p.y > 0);
+  if (pts.length < 2) return `<div class="tiny muted center" style="padding:24px">Noch zu wenig Daten für einen Trend (mind. 2 Einheiten).</div>`;
+  const ys = pts.map(p => p.y);
+  let min = Math.min(...ys), max = Math.max(...ys);
+  if (min === max) { min = min * 0.9; max = max * 1.1 || 1; }
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const X = i => pad.l + (pts.length === 1 ? iw / 2 : (i / (pts.length - 1)) * iw);
+  const Y = v => pad.t + ih - ((v - min) / (max - min)) * ih;
+  const line = pts.map((p, i) => `${X(i).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ');
+  const area = `${pad.l},${pad.t + ih} ${line} ${(pad.l + iw).toFixed(1)},${pad.t + ih}`;
+  const dots = pts.map((p, i) => `<circle class="chart-dot" cx="${X(i).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="2.5" />`).join('');
+  const gridY = [min, (min + max) / 2, max].map(v =>
+    `<line class="chart-grid" x1="${pad.l}" y1="${Y(v).toFixed(1)}" x2="${W - pad.r}" y2="${Y(v).toFixed(1)}" />
+     <text class="chart-lbl" x="2" y="${(Y(v) + 3).toFixed(1)}">${fmtWeight(v)}</text>`).join('');
+  const first = pts[0].label, lastl = pts[pts.length - 1].label;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <defs><linearGradient id="grad" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity="0.5"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+    ${gridY}
+    <polygon class="chart-area" points="${area}" />
+    <polyline class="chart-line" points="${line}" />
+    ${dots}
+    <text class="chart-lbl" x="${pad.l}" y="${H - 5}">${esc(first)}</text>
+    <text class="chart-lbl" x="${W - pad.r}" y="${H - 5}" text-anchor="end">${esc(lastl)}</text>
+  </svg>`;
+}
+
+// ============================================================
+//  Ansicht: Einstellungen / Backup
+// ============================================================
+route('/settings', () => {
+  setChrome({ title: 'Einstellungen', back: true });
+  const s = DB.db().settings;
+  const stats = { ex: DB.exercises().length, loc: DB.locations().length, plans: DB.db().plans.length, days: DB.db().days.length, ses: DB.sessions().length };
+  appEl.innerHTML = `
+    <div class="section-title">Standardwerte</div>
+    <div class="card">
+      <label class="field" style="margin:0"><span>Standard-Pausenzeit (s)</span>
+        <input id="s-rest" type="number" min="0" step="5" value="${s.defaultRestSec}" /></label>
+      <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
+        <input id="s-sound" type="checkbox" ${s.soundOnRestEnd ? 'checked' : ''} style="width:auto" />
+        <span style="margin:0">Ton/Vibration am Pausenende</span></label>
+    </div>
+
+    <div class="section-title">Daten & Backup</div>
+    <div class="card">
+      <p class="tiny muted" style="margin-top:0">Alle Daten liegen <b>lokal auf diesem Gerät</b> (im Browser). Es gibt keinen Server. Erstelle regelmäßig ein Backup!</p>
+      <div class="tiny muted">${stats.loc} Orte · ${stats.plans} Pläne · ${stats.days} Trainingstage · ${stats.ex} Übungen · ${stats.ses} Einheiten</div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn primary" id="expBtn">⬇ Backup exportieren</button>
+        <button class="btn" id="impBtn">⬆ Importieren</button>
+      </div>
+      <input type="file" id="impFile" accept="application/json,.json" hidden />
+    </div>
+
+    <div class="section-title">Beispieldaten</div>
+    <div class="card">
+      <p class="tiny muted" style="margin-top:0">Zum Ausprobieren einen Beispiel-Ort mit Plan, Übungen und Verlauf anlegen.</p>
+      <button class="btn" id="seedBtn">Beispieldaten laden</button>
+    </div>
+
+    <div class="section-title">Gefahrenzone</div>
+    <div class="card">
+      <button class="btn danger block" id="wipeBtn">Alle Daten löschen</button>
+    </div>
+    <p class="tiny muted center" style="margin-top:14px">Trainingsplan · lokale PWA · v1</p>
+  `;
+
+  $('#s-rest', appEl).onchange = e => { s.defaultRestSec = Math.max(0, parseInt(e.target.value) || 0); DB.save(); };
+  $('#s-sound', appEl).onchange = e => { s.soundOnRestEnd = e.target.checked; DB.save(); };
+
+  $('#expBtn', appEl).onclick = () => {
+    const blob = new Blob([DB.exportData()], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { href: url, download: `trainingsplan-backup-${DB.todayISO()}.json` });
+    document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    toast('Backup exportiert');
+  };
+  const impFile = $('#impFile', appEl);
+  $('#impBtn', appEl).onclick = () => impFile.click();
+  impFile.onchange = async () => {
+    const file = impFile.files[0]; if (!file) return;
+    const text = await file.text();
+    const mode = await confirmDialog('Backup importieren: Bestehende Daten ERSETZEN? (Abbrechen = zusammenführen)', { okText: 'Ersetzen' });
+    try { DB.importData(text, mode ? 'replace' : 'merge'); toast('Import erfolgreich'); render(); }
+    catch (e) { toast('Import fehlgeschlagen: ' + e.message); }
+    impFile.value = '';
+  };
+  $('#seedBtn', appEl).onclick = async () => {
+    if (await confirmDialog('Beispieldaten hinzufügen?')) { seedDemo(); toast('Beispieldaten geladen'); navigate('/plans'); }
+  };
+  $('#wipeBtn', appEl).onclick = async () => {
+    if (await confirmDialog('Wirklich ALLE Daten unwiderruflich löschen?', { danger: true, okText: 'Alles löschen' })) {
+      DB.wipeAll(); toast('Alle Daten gelöscht'); navigate('/');
+    }
+  };
+});
+
+// ---------- Beispieldaten ----------
+function seedDemo() {
+  const bank = DB.addExercise({ name: 'Bankdrücken', category: 'Brust', muscles: ['Brust', 'Trizeps'] });
+  const squat = DB.addExercise({ name: 'Kniebeuge', category: 'Beine', muscles: ['Quadrizeps', 'Gesäß'] });
+  const row = DB.addExercise({ name: 'Rudern', category: 'Rücken', muscles: ['Latissimus', 'Bizeps'] });
+  const ohp = DB.addExercise({ name: 'Schulterdrücken', category: 'Schulter', muscles: ['Schulter'] });
+
+  const loc = DB.addLocation({ name: 'Fitnessstudio', emoji: '🏋️', color: COLORS[0] });
+  const plan = DB.addPlan({ locationId: loc.id, name: 'Oberkörper / Unterkörper', emoji: '🔄', color: COLORS[0] });
+  const upper = DB.addDay({ planId: plan.id, name: 'Oberkörper', emoji: 'OK', color: COLORS[3] });
+  const lower = DB.addDay({ planId: plan.id, name: 'Unterkörper', emoji: '🦵', color: COLORS[1] });
+  DB.addExerciseToDay(upper.id, bank.id, { sets: 3, reps: 8, restSec: 120 });
+  DB.addExerciseToDay(upper.id, row.id, { sets: 3, reps: 10, restSec: 90 });
+  DB.addExerciseToDay(upper.id, ohp.id, { sets: 3, reps: 10, restSec: 90 });
+  DB.addExerciseToDay(lower.id, squat.id, { sets: 4, reps: 6, restSec: 150 });
+
+  // Ein paar vergangene Einheiten für Statistik
+  const d = DB.db();
+  const mk = (dayId, daysAgo, entriesData) => {
+    const base = new Date(); base.setDate(base.getDate() - daysAgo);
+    const iso = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
+    const day = DB.getDay(dayId);
+    const s = {
+      id: DB.uid('ses'), locationId: loc.id, planId: plan.id, dayId, dayName: day.name,
+      date: iso, startedAt: base.getTime(), finishedAt: base.getTime() + 3600000,
+      emoji: day.emoji, color: day.color, note: '',
+      entries: entriesData,
+    };
+    d.sessions.push(s);
+  };
+  const setsOf = (exId, name, arr) => ({ exerciseId: exId, name, unit: 'kg', targetReps: arr[0][1], targetSets: arr.length, restSec: 120, sets: arr.map(([w, r]) => ({ weight: w, reps: r, done: true })) });
+  mk(upper.id, 21, [setsOf(bank.id, 'Bankdrücken', [[60, 8], [60, 8], [55, 9]]), setsOf(row.id, 'Rudern', [[50, 10], [50, 10], [50, 9]])]);
+  mk(upper.id, 14, [setsOf(bank.id, 'Bankdrücken', [[62.5, 8], [62.5, 7], [60, 8]]), setsOf(row.id, 'Rudern', [[52.5, 10], [52.5, 10], [50, 10]])]);
+  mk(upper.id, 7, [setsOf(bank.id, 'Bankdrücken', [[65, 8], [65, 7], [62.5, 8]]), setsOf(row.id, 'Rudern', [[55, 10], [55, 9], [52.5, 10]])]);
+  mk(lower.id, 18, [setsOf(squat.id, 'Kniebeuge', [[80, 6], [80, 6], [80, 5], [75, 6]])]);
+  mk(lower.id, 11, [setsOf(squat.id, 'Kniebeuge', [[85, 6], [85, 5], [82.5, 6], [80, 6]])]);
+  mk(lower.id, 4, [setsOf(squat.id, 'Kniebeuge', [[87.5, 6], [87.5, 6], [85, 6], [82.5, 6]])]);
+  DB.save();
+}
+
+// ============================================================
+//  Start
+// ============================================================
+DB.db();
+render();
+
+
+</script>
+</body>
+</html>
