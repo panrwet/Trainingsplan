@@ -7,6 +7,7 @@ Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – instal
 
 - **Übungsbibliothek** – lege deine Übungen selbst an (Name, Kategorie, Muskelgruppen, Notiz). Wiederverwendbar in allen Plänen.
 - **Hierarchie:** **Ort** (z. B. Fitnessstudio, Zuhause) → **Trainingsplan** → **Trainingstag** → **Übungen**
+- **Orte oben als Reiter** – der aktive Ort filtert die ganze App. **Alle Daten (Statistik, „letztes Mal", Verlauf) sind je Ort getrennt**, weil Geräte zwischen Gyms nicht vergleichbar sind (z. B. Brustpresse 80 kg in Gym A ≙ 50 kg in Gym B). So bleibt „Bankdrücken Gym A" von „Bankdrücken Gym B" sauber getrennt. Das Orts-Kürzel steht klein neben Plan/Trainingstag/Übung.
 - **Training aufzeichnen** – Gewicht & Wiederholungen je Satz eingeben. Klein darunter steht, was du **beim letzten Mal** hattest.
 - **Sätze, Pausen & Übungen anpassbar** – beim Erstellen des Plans **und** während des Trainings (Sätze hinzufügen/entfernen, Pausenzeit ändern, Übungen ergänzen/entfernen).
 - **Pausen-Timer** – Countdown nach jedem abgehakten Satz (mit Ton/Vibration).

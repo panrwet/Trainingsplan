@@ -73,9 +73,24 @@ export function exerciseUsage(id) {
 // ---------- Orte ----------
 export function locations() { return db().locations.slice(); }
 export function getLocation(id) { return db().locations.find(l => l.id === id) || null; }
+
+// Aktiver Ort (globaler Filter / oberer Reiter). Fällt auf den ersten Ort zurück.
+export function getActiveLocationId() {
+  const d = db();
+  let id = d.settings.activeLocationId;
+  if (!id || !d.locations.some(l => l.id === id)) {
+    id = d.locations.length ? d.locations[0].id : null;
+    d.settings.activeLocationId = id;
+  }
+  return id;
+}
+export function getActiveLocation() { const id = getActiveLocationId(); return id ? getLocation(id) : null; }
+export function setActiveLocation(id) { db().settings.activeLocationId = id; save(); }
 export function addLocation(data) {
   const l = { id: uid('loc'), name: '', emoji: '📍', color: '#6c8cff', createdAt: Date.now(), ...data };
-  db().locations.push(l); save(); return l;
+  db().locations.push(l);
+  db().settings.activeLocationId = l.id; // neuen Ort direkt aktiv setzen
+  save(); return l;
 }
 export function updateLocation(id, patch) { const l = getLocation(id); if (l) { Object.assign(l, patch); save(); } return l; }
 export function deleteLocation(id) {
@@ -185,14 +200,16 @@ export function startSession(dayId) {
 export function updateSession(id, patch) { const s = getSession(id); if (s) { Object.assign(s, patch); save(); } return s; }
 export function deleteSession(id) { const d = db(); d.sessions = d.sessions.filter(s => s.id !== id); save(); }
 
-// Letzte abgeschlossene Sätze einer Übung VOR einer bestimmten Einheit (für "letztes Mal")
-export function lastEntryFor(exerciseId, beforeSessionId = null) {
+// Letzte abgeschlossene Sätze einer Übung VOR einer bestimmten Einheit (für "letztes Mal").
+// Optional auf einen Ort beschränkt (Geräte sind zwischen Gyms nicht vergleichbar).
+export function lastEntryFor(exerciseId, beforeSessionId = null, locationId = null) {
   const all = sessions(); // absteigend nach startedAt
   const current = beforeSessionId ? getSession(beforeSessionId) : null;
   const cutoff = current ? current.startedAt : Infinity;
   for (const s of all) {
     if (s.id === beforeSessionId) continue;
     if ((s.startedAt || 0) >= cutoff) continue;
+    if (locationId && s.locationId !== locationId) continue;
     const e = (s.entries || []).find(en => en.exerciseId === exerciseId && (en.sets || []).some(hasData));
     if (e) return { session: s, entry: e };
   }
@@ -218,9 +235,11 @@ export function epley1RM(weight, reps) {
 
 // ---------- Statistik je Übung ----------
 // Liefert je Einheit (chronologisch aufsteigend) aggregierte Kennzahlen.
-export function exerciseHistory(exerciseId) {
+// Optional auf einen Ort beschränkt -> getrennte Statistik je Gym.
+export function exerciseHistory(exerciseId, locationId = null) {
   const rows = [];
   for (const s of db().sessions) {
+    if (locationId && s.locationId !== locationId) continue;
     const entries = (s.entries || []).filter(e => e.exerciseId === exerciseId);
     if (!entries.length) continue;
     const workSets = [];
@@ -252,9 +271,9 @@ export function exerciseHistory(exerciseId) {
   return rows;
 }
 
-// Persönliche Rekorde je Übung
-export function exercisePRs(exerciseId) {
-  const hist = exerciseHistory(exerciseId);
+// Persönliche Rekorde je Übung (optional je Ort)
+export function exercisePRs(exerciseId, locationId = null) {
+  const hist = exerciseHistory(exerciseId, locationId);
   const pr = { maxWeight: 0, best1rm: 0, maxVolume: 0, maxReps: 0, sessionsCount: hist.length, lastDate: null, firstDate: null };
   hist.forEach(r => {
     if (r.maxWeight > pr.maxWeight) pr.maxWeight = r.maxWeight;
@@ -264,6 +283,16 @@ export function exercisePRs(exerciseId) {
   });
   if (hist.length) { pr.firstDate = hist[0].date; pr.lastDate = hist[hist.length - 1].date; }
   return pr;
+}
+
+// Übungen, die an einem Ort tatsächlich trainiert wurden (mit abgehakten Sätzen)
+export function exercisesTrainedAtLocation(locationId) {
+  const ids = new Set();
+  for (const s of db().sessions) {
+    if (locationId && s.locationId !== locationId) continue;
+    (s.entries || []).forEach(e => { if ((e.sets || []).some(isWorkingDone)) ids.add(e.exerciseId); });
+  }
+  return exercises().filter(e => ids.has(e.id));
 }
 
 // ---------- Kalender ----------

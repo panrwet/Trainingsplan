@@ -128,6 +128,29 @@ function actionBtn(label, onClick, cls = '') {
   return el('button', { class: 'icon-btn ' + cls, onclick: onClick, 'aria-label': label }, label);
 }
 
+// ---------- Orts-Reiter (oben) & Orts-Kürzel ----------
+// Die Daten (Statistik, "letztes Mal", Verlauf) sind je Ort getrennt,
+// weil Geräte zwischen Gyms nicht vergleichbar sind.
+function locationBarHTML() {
+  const locs = DB.locations();
+  const active = DB.getActiveLocationId();
+  if (!locs.length) return '';
+  return `<div class="loc-bar">
+    ${locs.map(l => `<button class="loc-chip ${l.id === active ? 'sel' : ''}" data-loc-sel="${l.id}">
+        <span>${esc(l.emoji)}</span><span>${esc(l.name)}</span></button>`).join('')}
+    <button class="loc-chip add" data-loc-add title="Ort hinzufügen">＋</button>
+  </div>`;
+}
+function wireLocationBar(root) {
+  $$('[data-loc-sel]', root).forEach(b => b.onclick = () => { DB.setActiveLocation(b.dataset.locSel); render(); });
+  const add = $('[data-loc-add]', root); if (add) add.onclick = () => editLocationModal(null);
+}
+// kleines Orts-Kürzel-Badge (Emoji/Kürzel des Ortes)
+function locBadge(loc) {
+  if (!loc) return '';
+  return `<span class="loc-badge" title="${esc(loc.name)}">${esc(loc.emoji)}</span>`;
+}
+
 // ============================================================
 //  Router
 // ============================================================
@@ -172,12 +195,28 @@ window.addEventListener('hashchange', render);
 // ============================================================
 route('/', () => {
   setChrome({ title: 'Training', back: false });
-  const unfinished = DB.sessions().filter(s => !s.finishedAt);
   const locs = DB.locations();
-  const recent = DB.sessions().filter(s => s.finishedAt).slice(0, 3);
-  const totalDays = DB.db().days.length;
+  const active = DB.getActiveLocation();
 
-  let html = '';
+  let html = locationBarHTML();
+
+  if (!locs.length) {
+    html += `<div class="empty">
+      <div class="big">📍</div>
+      <div>Lege zuerst einen Trainingsort an.</div>
+      <div class="tiny" style="margin:8px 0 14px">Ein Ort ist z.B. „Fitnessstudio" oder „Zuhause". Die Daten werden je Ort getrennt geführt (Geräte sind zwischen Gyms nicht vergleichbar).</div>
+      <button class="btn primary" data-add-loc>+ Ort anlegen</button>
+    </div>`;
+    appEl.innerHTML = html;
+    const a = $('[data-add-loc]', appEl); if (a) a.onclick = () => editLocationModal(null);
+    return;
+  }
+
+  const locId = active.id;
+  const unfinished = DB.sessions().filter(s => !s.finishedAt && s.locationId === locId);
+  const recent = DB.sessions().filter(s => s.finishedAt && s.locationId === locId).slice(0, 3);
+  const plans = DB.plansByLocation(locId);
+  const daysInLoc = plans.flatMap(p => DB.daysByPlan(p.id));
 
   if (unfinished.length) {
     html += `<div class="section-title">Laufendes Training</div>`;
@@ -196,35 +235,27 @@ route('/', () => {
     });
   }
 
-  html += `<div class="section-title">Schnellstart</div>`;
-  if (!totalDays) {
+  html += `<div class="section-title">Schnellstart · ${esc(active.emoji)} ${esc(active.name)}</div>`;
+  if (!daysInLoc.length) {
     html += `<div class="empty">
       <div class="big">🏋️</div>
-      <div>Noch keine Trainingstage angelegt.</div>
-      <div class="tiny" style="margin:8px 0 14px">Lege zuerst einen Ort, einen Plan und Trainingstage an.</div>
-      <a class="btn primary" href="#/plans">Jetzt einrichten</a>
+      <div>Für „${esc(active.name)}" gibt es noch keine Trainingstage.</div>
+      <div class="tiny" style="margin:8px 0 14px">Lege einen Plan und Trainingstage für diesen Ort an.</div>
+      <a class="btn primary" href="#/plans">Plan einrichten</a>
     </div>`;
   } else {
-    locs.forEach(loc => {
-      const plans = DB.plansByLocation(loc.id);
-      const daysInLoc = plans.flatMap(p => DB.daysByPlan(p.id));
-      if (!daysInLoc.length) return;
+    plans.forEach(p => {
+      const days = DB.daysByPlan(p.id);
+      if (!days.length) return;
       html += `<div class="card">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <span style="font-size:1.2rem">${esc(loc.emoji)}</span><b>${esc(loc.name)}</b>
+        <div class="tiny muted" style="margin:0 0 6px">${esc(p.emoji)} ${esc(p.name)}</div>`;
+      days.forEach(day => {
+        html += `<div class="list-row" data-start="${day.id}" style="margin-bottom:8px">
+          <div class="chip" style="background:${esc(day.color)}22;color:${esc(day.color)}">${esc(day.emoji)}</div>
+          <div class="grow"><div class="r-title">${esc(day.name)}</div>
+            <div class="r-sub">${day.exercises.length} Übungen</div></div>
+          <span class="btn good sm">Start ▶</span>
         </div>`;
-      plans.forEach(p => {
-        const days = DB.daysByPlan(p.id);
-        if (!days.length) return;
-        html += `<div class="tiny muted" style="margin:6px 0 4px">${esc(p.emoji)} ${esc(p.name)}</div>`;
-        days.forEach(day => {
-          html += `<div class="list-row" data-start="${day.id}" style="margin-bottom:8px">
-            <div class="chip" style="background:${esc(day.color)}22;color:${esc(day.color)}">${esc(day.emoji)}</div>
-            <div class="grow"><div class="r-title">${esc(day.name)}</div>
-              <div class="r-sub">${day.exercises.length} Übungen</div></div>
-            <span class="btn good sm">Start ▶</span>
-          </div>`;
-        });
       });
       html += `</div>`;
     });
@@ -237,7 +268,7 @@ route('/', () => {
   }
 
   appEl.innerHTML = html;
-
+  wireLocationBar(appEl);
   $$('[data-goto]', appEl).forEach(n => n.onclick = () => navigate(n.dataset.goto));
   $$('[data-start]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); startTraining(n.dataset.start); });
   $$('[data-session]', appEl).forEach(n => n.onclick = () => navigate('/train/' + n.dataset.session));
@@ -262,27 +293,45 @@ function startTraining(dayId) {
 //  Ansicht: Pläne (Orte-Übersicht)
 // ============================================================
 route('/plans', () => {
-  setChrome({ title: 'Orte & Pläne', back: false, actions: [actionBtn('⚙️', () => navigate('/settings'))] });
+  setChrome({ title: 'Pläne', back: false, actions: [actionBtn('⚙️', () => navigate('/settings'))] });
   const locs = DB.locations();
-  let html = '';
+  let html = locationBarHTML();
+
   if (!locs.length) {
     html += `<div class="empty"><div class="big">📍</div><div>Noch keine Trainingsorte.</div>
-      <div class="tiny" style="margin:8px 0 0">Ein Ort ist z.B. „Fitnessstudio" oder „Zuhause".</div></div>`;
+      <div class="tiny" style="margin:8px 0 12px">Ein Ort ist z.B. „Fitnessstudio" oder „Zuhause".</div>
+      <button class="btn primary" data-add-loc>+ Ort anlegen</button></div>`;
+    appEl.innerHTML = html;
+    const a = $('[data-add-loc]', appEl); if (a) a.onclick = () => editLocationModal(null);
+    return;
+  }
+
+  const active = DB.getActiveLocation();
+  const plans = DB.plansByLocation(active.id);
+
+  html += `<div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Pläne · ${esc(active.emoji)} ${esc(active.name)}</span>
+    <button class="btn ghost sm" data-edit-loc>✏️ Ort</button></div>`;
+
+  if (!plans.length) {
+    html += `<div class="empty"><div class="big">📋</div><div>Noch keine Pläne an diesem Ort.</div>
+      <div class="tiny" style="margin:8px 0 0">Tippe unten auf „＋".</div></div>`;
   } else {
-    locs.forEach(loc => {
-      const plans = DB.plansByLocation(loc.id);
-      html += `<div class="list-row" data-loc="${loc.id}">
-        <div class="chip" style="background:${esc(loc.color)}22;color:${esc(loc.color)}">${esc(loc.emoji)}</div>
-        <div class="grow"><div class="r-title">${esc(loc.name)}</div>
-          <div class="r-sub">${plans.length} ${plans.length === 1 ? 'Plan' : 'Pläne'}</div></div>
+    plans.forEach(p => {
+      const days = DB.daysByPlan(p.id);
+      html += `<div class="list-row" data-plan="${p.id}">
+        <div class="chip" style="background:${esc(p.color)}22;color:${esc(p.color)}">${esc(p.emoji)}</div>
+        <div class="grow"><div class="r-title">${esc(p.name)}</div>
+          <div class="r-sub">${days.length} Trainingstage</div></div>
         <span class="arrow">›</span></div>`;
     });
   }
-  appEl.innerHTML = html;
-  $$('[data-loc]', appEl).forEach(n => n.onclick = () => navigate('/location/' + n.dataset.loc));
 
-  const fab = el('button', { class: 'fab', onclick: () => editLocationModal(null) }, '+');
-  appEl.append(fab);
+  appEl.innerHTML = html;
+  wireLocationBar(appEl);
+  const editLoc = $('[data-edit-loc]', appEl); if (editLoc) editLoc.onclick = () => editLocationModal(active.id);
+  $$('[data-plan]', appEl).forEach(n => n.onclick = () => navigate('/plan/' + n.dataset.plan));
+  appEl.append(el('button', { class: 'fab', onclick: () => editPlanModal(null, active.id) }, '+'));
 });
 
 function editLocationModal(id) {
@@ -376,8 +425,10 @@ route('/plan/:id', ({ id }) => {
   const p = DB.getPlan(id);
   if (!p) return navigate('/plans');
   setChrome({ title: `${p.emoji} ${p.name}`, back: true, actions: [actionBtn('✏️', () => editPlanModal(id, p.locationId))] });
+  const loc = DB.getLocation(p.locationId);
   const days = DB.daysByPlan(id);
-  let html = `<div class="section-title">Trainingstage</div>`;
+  let html = `${loc ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(loc.emoji)} ${esc(loc.name)}</div>` : ''}
+    <div class="section-title">Trainingstage</div>`;
   if (!days.length) {
     html += `<div class="empty"><div class="big">💪</div><div>Noch keine Trainingstage.</div>
       <div class="tiny" style="margin:8px 0 0">Ein Trainingstag ist z.B. „Push A" oder „Beine".</div></div>`;
@@ -442,8 +493,11 @@ route('/day/:id', ({ id }) => {
   const day = DB.getDay(id);
   if (!day) return navigate('/plans');
   setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: [actionBtn('✏️', () => editDayModal(id, day.planId))] });
+  const plan = DB.getPlan(day.planId);
+  const loc = plan ? DB.getLocation(plan.locationId) : null;
 
-  let html = `<button class="btn good block" id="startBtn" style="margin-bottom:16px">▶ Training starten</button>
+  let html = `${loc ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(loc.emoji)} ${esc(loc.name)} · ${esc(plan.emoji)} ${esc(plan.name)}</div>` : ''}
+    <button class="btn good block" id="startBtn" style="margin-bottom:16px">▶ Training starten</button>
     <div class="section-title">Übungen</div>`;
   if (!day.exercises.length) {
     html += `<div class="empty"><div class="big">📚</div><div>Noch keine Übungen.</div>
@@ -697,8 +751,9 @@ function renderEntries(container, id) {
   const wrap = $('#entries', container);
   wrap.innerHTML = '';
   s.entries.forEach((entry, ei) => {
-    const last = DB.lastEntryFor(entry.exerciseId, id);
-    const lastTxt = last ? setSummary(last.entry.sets) : '';
+    // "letztes Mal" nur vom selben Ort (Geräte sind zwischen Gyms nicht vergleichbar).
+    // Werte erscheinen als Platzhalter in den Feldern – daher keine separate Zeile mehr.
+    const last = DB.lastEntryFor(entry.exerciseId, id, s.locationId);
     const block = el('div', { class: 'ex-block' });
     block.innerHTML = `
       <div class="ex-head">
@@ -706,7 +761,6 @@ function renderEntries(container, id) {
         <button class="btn ghost sm" data-rest>⏱ ${entry.restSec}s</button>
         <button class="btn ghost sm" data-rmex>🗑️</button>
       </div>
-      ${lastTxt ? `<div class="ex-last">Letztes Mal (${fmtShort(last.session.date)}): <b>${esc(lastTxt)}</b></div>` : `<div class="ex-last">Erstes Mal – noch keine Vergleichsdaten</div>`}
       <div class="ex-body">
         <div class="set-head"><span>#</span><span>Gewicht</span><span>Wdh.</span><span>✓</span><span></span></div>
         <div class="sets"></div>
@@ -987,33 +1041,44 @@ function dayDetailModal(dateKey, evs) {
 // ============================================================
 route('/stats', () => {
   setChrome({ title: 'Statistik', back: false });
-  const list = DB.exercises().filter(e => DB.exerciseHistory(e.id).length > 0);
-  let html = `<p class="tiny muted">Wähle eine Übung für Verlauf, Rekorde und Trends.</p>`;
+  const locs = DB.locations();
+  let html = locationBarHTML();
+  if (!locs.length) {
+    html += `<div class="empty"><div class="big">📈</div><div>Noch keine Orte/Trainingsdaten.</div></div>`;
+    appEl.innerHTML = html; return;
+  }
+  const active = DB.getActiveLocation();
+  const list = DB.exercisesTrainedAtLocation(active.id);
+  html += `<p class="tiny muted">Statistik für <b>${esc(active.emoji)} ${esc(active.name)}</b> – je Ort getrennt, da Geräte zwischen Gyms nicht vergleichbar sind.</p>`;
   if (!list.length) {
-    html += `<div class="empty"><div class="big">📈</div><div>Noch keine Trainingsdaten.</div>
-      <div class="tiny" style="margin:8px 0 0">Zeichne ein paar Trainings auf – dann erscheinen hier Statistiken.</div></div>`;
+    html += `<div class="empty"><div class="big">📈</div><div>Noch keine Trainingsdaten für „${esc(active.name)}".</div>
+      <div class="tiny" style="margin:8px 0 0">Zeichne an diesem Ort ein paar Trainings auf.</div></div>`;
   } else {
     list.forEach(e => {
-      const pr = DB.exercisePRs(e.id);
+      const pr = DB.exercisePRs(e.id, active.id);
       html += `<div class="list-row" data-ex="${e.id}">
-        <div class="grow"><div class="r-title">${esc(e.name)}</div>
+        <div class="grow"><div class="r-title">${esc(e.name)} ${locBadge(active)}</div>
           <div class="r-sub">${pr.sessionsCount}× · Bestes 1RM ${fmtWeight(pr.best1rm)} kg · Max ${fmtWeight(pr.maxWeight)} kg</div></div>
         <span class="arrow">›</span></div>`;
     });
   }
   appEl.innerHTML = html;
+  wireLocationBar(appEl);
   $$('[data-ex]', appEl).forEach(n => n.onclick = () => navigate('/stats/' + n.dataset.ex));
 });
 
 route('/stats/:id', ({ id }) => {
   const ex = DB.getExercise(id);
   if (!ex) return navigate('/stats');
+  const active = DB.getActiveLocation();
+  const locId = active ? active.id : null;
   setChrome({ title: ex.name, back: true, actions: [actionBtn('✏️', () => editExerciseModal(id))] });
-  const hist = DB.exerciseHistory(id);
-  const pr = DB.exercisePRs(id);
+  const hist = DB.exerciseHistory(id, locId);
+  const pr = DB.exercisePRs(id, locId);
+  const locLine = active ? `<div class="tiny muted" style="margin:-2px 0 12px">${esc(ex.name)} · ${esc(active.emoji)} ${esc(active.name)}</div>` : '';
 
   if (!hist.length) {
-    appEl.innerHTML = `<div class="empty"><div class="big">📈</div><div>Noch keine aufgezeichneten Sätze für „${esc(ex.name)}".</div></div>`;
+    appEl.innerHTML = `${locLine}<div class="empty"><div class="big">📈</div><div>Noch keine aufgezeichneten Sätze für „${esc(ex.name)}"${active ? ' an „' + esc(active.name) + '"' : ''}.</div></div>`;
     return;
   }
 
@@ -1041,6 +1106,7 @@ route('/stats/:id', ({ id }) => {
   </tr>`).join('');
 
   appEl.innerHTML = `
+    ${locLine}
     ${tiles}
     <div class="chart-wrap"><div class="c-title"><span>Geschätztes 1RM (Epley)</span><span>${fmtWeight(pr.best1rm)} kg</span></div>${e1rmChart}</div>
     <div class="chart-wrap"><div class="c-title"><span>Max. Gewicht je Einheit</span><span>${fmtWeight(pr.maxWeight)} kg</span></div>${wChart}</div>
