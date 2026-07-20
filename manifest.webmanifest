@@ -1,0 +1,16 @@
+{
+  "name": "Trainingsplan – Krafttraining Tracker",
+  "short_name": "Training",
+  "description": "Krafttraining aufzeichnen: Übungsbibliothek, Orte, Pläne, Trainingstage, Statistiken und Kalender – lokal & offline.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1220",
+  "theme_color": "#0f1220",
+  "lang": "de",
+  "icons": [
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icons/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

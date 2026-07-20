@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1220" />
+  <title>Trainingsplan – Krafttraining Tracker</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icons/icon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Training" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header id="topbar">
+    <button id="backBtn" class="icon-btn" aria-label="Zurück" hidden>‹</button>
+    <h1 id="title">Training</h1>
+    <div id="topActions"></div>
+  </header>
+
+  <main id="app"><!-- views render here --></main>
+
+  <nav id="tabbar">
+    <a href="#/" class="tab" data-tab="home"><span class="tico">🏠</span><span>Start</span></a>
+    <a href="#/plans" class="tab" data-tab="plans"><span class="tico">📋</span><span>Pläne</span></a>
+    <a href="#/calendar" class="tab" data-tab="calendar"><span class="tico">📅</span><span>Kalender</span></a>
+    <a href="#/stats" class="tab" data-tab="stats"><span class="tico">📈</span><span>Statistik</span></a>
+    <a href="#/library" class="tab" data-tab="library"><span class="tico">📚</span><span>Übungen</span></a>
+  </nav>
+
+  <div id="modalRoot"></div>
+  <div id="toastRoot"></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
