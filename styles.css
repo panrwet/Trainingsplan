@@ -182,9 +182,15 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 .train-head .chip { width: 44px; height: 44px; border-radius: 11px; display: grid; place-items: center; font-size: 1.4rem; background: var(--bg-elev2); }
 
 .ex-block { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 10px; overflow: hidden; }
-.ex-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.ex-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
 .ex-head .ex-name { flex: 1; font-weight: 700; font-size: .95rem; }
-.ex-body { padding: 9px 10px 10px; }
+.ex-head [data-menu] { font-size: 1.3rem; line-height: 1; padding: 4px 10px; }
+.ex-meta { padding: 0 12px 8px; }
+.ex-note {
+  margin-top: 6px; padding: 7px 10px; background: var(--bg-elev2); border-radius: var(--radius-sm);
+  font-size: .82rem; color: var(--text-dim); border-left: 3px solid var(--warn);
+}
+.ex-body { padding: 9px 10px 10px; border-top: 1px solid var(--border); }
 
 .set-row { display: grid; grid-template-columns: 26px 1fr 1fr 44px 40px; gap: 8px; align-items: center; margin-bottom: 8px; }
 .set-row .setno { color: var(--text-dim2); font-weight: 700; text-align: center; font-size: .9rem; }
@@ -196,7 +202,23 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 .set-head { display: grid; grid-template-columns: 26px 1fr 1fr 44px 40px; gap: 8px; font-size: .7rem; color: var(--text-dim2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; padding: 0 2px; }
 .set-head span { text-align: center; }
 
-.ex-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+/* ---------- Aktions-Menü (Übung im Training) ---------- */
+.sheet { display: flex; flex-direction: column; gap: 6px; }
+.sheet-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: var(--bg-elev2); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius-sm); padding: 12px 14px; font-size: .92rem; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+.sheet-btn:active { transform: translateY(1px); }
+.sheet-btn.danger { color: var(--bad); }
+
+/* ---------- Muskel-/Geräte-Labels ---------- */
+.tag-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.tag-badge { font-size: .72rem; font-weight: 650; padding: 2px 9px; border-radius: 999px; }
+.tag-badge.muscle { background: rgba(125, 211, 252, .16); color: #7dd3fc; }
+.tag-badge.equip { background: rgba(134, 239, 172, .16); color: #86efac; }
+.tag-badge.neutral { background: var(--bg-elev2); color: var(--text-dim); border: 1px solid var(--border); }
 
 /* ---------- Rest timer ---------- */
 #restBar {
@@ -302,8 +324,23 @@ a { color: var(--accent); }
   padding: 0 5px; margin-left: 4px; vertical-align: middle;
 }
 
-/* ---------- Übungsbibliothek: Filter-Chips ---------- */
-.filter-bar { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+/* ---------- Übungsbibliothek: Filter (Ausklappmenüs) ---------- */
+.filter-acc {
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  margin-bottom: 6px; overflow: hidden;
+}
+.filter-acc summary {
+  list-style: none; cursor: pointer; padding: 10px 12px; display: flex; align-items: center;
+  font-size: .86rem; font-weight: 650; color: var(--text);
+}
+.filter-acc summary::-webkit-details-marker { display: none; }
+.filter-acc summary::after { content: '⌄'; color: var(--text-dim2); margin-left: auto; font-size: 1rem; transition: transform .15s; }
+.filter-acc[open] summary::after { transform: rotate(180deg); }
+.filter-acc .filter-row { padding: 0 10px 10px; }
+.acc-badge {
+  background: var(--accent); color: #fff; font-size: .7rem; font-weight: 700;
+  border-radius: 999px; padding: 1px 7px; margin-left: 8px; min-width: 16px; text-align: center;
+}
 .filter-row { display: flex; gap: 6px; flex-wrap: wrap; }
 .filter-chip {
   background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-dim);

@@ -539,6 +539,7 @@ route('/day/:id', ({ id }) => {
       html += `<div class="card" data-item="${item.id}">
         <div style="display:flex;align-items:center;gap:8px">
           <div class="grow" style="flex:1"><b>${esc(ex ? ex.name : '(gelöscht)')}</b>
+            ${ex ? tagBadgesHTML(ex) : ''}
             <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh · Pause ${item.restSec}s</div></div>
           <span class="mv" data-up="${item.id}" style="padding:4px 6px;color:var(--text-dim2)">▲</span>
           <span class="mv" data-down="${item.id}" style="padding:4px 6px;color:var(--text-dim2)">▼</span>
@@ -613,7 +614,7 @@ function pickExerciseModal(onPick) {
         const items = list.filter(e => e.name.toLowerCase().includes(q.toLowerCase()));
         listEl.innerHTML = items.length ? items.map(e =>
           `<div class="list-row" data-pick="${e.id}"><div class="grow"><div class="r-title">${esc(e.name)}</div>
-            ${exSubtitle(e) ? `<div class="r-sub">${esc(exSubtitle(e))}</div>` : ''}</div><span class="arrow">＋</span></div>`
+            ${tagBadgesHTML(e)}</div><span class="arrow">＋</span></div>`
         ).join('') : `<div class="tiny muted center" style="padding:12px">Keine Übung gefunden.</div>`;
         $$('[data-pick]', listEl).forEach(n => n.onclick = () => { close(); onPick(n.dataset.pick); });
       };
@@ -624,8 +625,16 @@ function pickExerciseModal(onPick) {
   });
 }
 
-function exSubtitle(e) {
-  return [e.equipment, (e.muscles || []).join(', ')].filter(Boolean).join(' · ');
+// Farbige Muskel-/Geräte-Labels wie in der Bibliothek (auch im Training genutzt).
+// Farbigkeit ist über Einstellungen -> "Farbige Muskel-/Geräte-Labels" abschaltbar.
+function tagBadgesHTML(ex) {
+  if (!ex) return '';
+  const colored = DB.db().settings.tagColors;
+  const mCls = colored ? 'tag-badge muscle' : 'tag-badge neutral';
+  const eCls = colored ? 'tag-badge equip' : 'tag-badge neutral';
+  const parts = (ex.muscles || []).map(m => `<span class="${mCls}">${esc(m)}</span>`);
+  if (ex.equipment) parts.push(`<span class="${eCls}">${esc(ex.equipment)}</span>`);
+  return parts.length ? `<div class="tag-badges">${parts.join('')}</div>` : '';
 }
 
 let libFilter = { muscles: new Set(), equipment: new Set() };
@@ -640,17 +649,24 @@ route('/library', () => {
     return;
   }
 
+  const muscleList = DB.muscleGroups();
   const equipList = DB.equipmentTypes();
   let html = `<input id="libSearch" placeholder="Suchen …" style="margin-bottom:10px" />
-    <div class="filter-bar">
-      <div class="filter-row" id="filterMuscles">${DB.MUSCLE_GROUPS.map(m => `<button class="filter-chip ${libFilter.muscles.has(m) ? 'sel' : ''}" data-fm="${esc(m)}">${esc(m)}</button>`).join('')}</div>
+    <details class="filter-acc"${libFilter.muscles.size ? ' open' : ''}>
+      <summary>Muskelgruppe${libFilter.muscles.size ? `<span class="acc-badge">${libFilter.muscles.size}</span>` : ''}</summary>
+      <div class="filter-row" id="filterMuscles">${muscleList.map(m => `<button class="filter-chip ${libFilter.muscles.has(m.name) ? 'sel' : ''}" data-fm="${esc(m.name)}">${esc(m.name)}</button>`).join('')}
+        <button class="filter-chip add" id="manageMgChip">⚙️ Verwalten</button></div>
+    </details>
+    <details class="filter-acc"${libFilter.equipment.size ? ' open' : ''}>
+      <summary>Gerät${libFilter.equipment.size ? `<span class="acc-badge">${libFilter.equipment.size}</span>` : ''}</summary>
       <div class="filter-row" id="filterEquip">${equipList.map(eq => `<button class="filter-chip ${libFilter.equipment.has(eq.name) ? 'sel' : ''}" data-fe="${esc(eq.name)}">${esc(eq.name)}</button>`).join('')}
-        <button class="filter-chip add" id="manageEqChip" title="Geräte-Arten verwalten">⚙️ Geräte</button></div>
-    </div>
-    <div id="libCount" class="tiny muted" style="margin:8px 0"></div>
+        <button class="filter-chip add" id="manageEqChip">⚙️ Verwalten</button></div>
+    </details>
+    <div id="libCount" class="tiny muted" style="margin:10px 0 8px">${list.length} von ${list.length} Übungen</div>
     <div id="libList"></div>`;
   appEl.innerHTML = html;
   $('#manageEqChip', appEl).onclick = () => manageEquipmentModal();
+  $('#manageMgChip', appEl).onclick = () => manageMuscleGroupsModal();
 
   $$('[data-fm]', appEl).forEach(b => b.onclick = () => {
     const m = b.dataset.fm;
@@ -679,7 +695,8 @@ route('/library', () => {
       const uses = DB.exerciseUsage(e.id);
       return `<div class="list-row" data-ex="${e.id}">
         <div class="grow"><div class="r-title">${esc(e.name)}</div>
-          <div class="r-sub">${exSubtitle(e) || 'ohne Angaben'}${uses ? ' · ' + uses + '× trainiert' : ''}</div></div>
+          ${tagBadgesHTML(e)}
+          ${uses ? `<div class="r-sub">${uses}× trainiert</div>` : ''}</div>
         <button class="btn ghost sm" data-edit="${e.id}">✏️</button>
         <span class="arrow" data-stats="${e.id}">📈</span></div>`;
     }).join('') : `<div class="empty"><div>Keine Übung passt zum Filter.</div></div>`;
@@ -704,7 +721,7 @@ function editExerciseModal(id, onSaved) {
     body: `
       <label class="field"><span>Name</span><input id="f-name" value="${esc(ex.name)}" placeholder="z.B. Bankdrücken" /></label>
       <label class="field"><span>Muskelgruppen</span></label>
-      <div class="filter-row" id="f-muscles" style="margin:-4px 0 12px">${DB.MUSCLE_GROUPS.map(m => `<button type="button" class="filter-chip ${muscles.has(m) ? 'sel' : ''}" data-m="${esc(m)}">${esc(m)}</button>`).join('')}</div>
+      <div class="filter-row" id="f-muscles" style="margin:-4px 0 12px"></div>
       <label class="field"><span>Gerät</span></label>
       <div class="filter-row" id="f-equip" style="margin:-4px 0 12px"></div>
       <label class="field"><span>Einheit</span>
@@ -712,10 +729,17 @@ function editExerciseModal(id, onSaved) {
       <label class="field"><span>Notiz (optional)</span><textarea id="f-notes" placeholder="Technik-Hinweise, Einstellung am Gerät …">${esc(ex.notes)}</textarea></label>`,
     footer: `${id ? '<button class="btn danger" data-del>Löschen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
     onMount: (m, close) => {
-      $$('[data-m]', m).forEach(b => b.onclick = () => {
-        muscles.has(b.dataset.m) ? muscles.delete(b.dataset.m) : muscles.add(b.dataset.m);
-        b.classList.toggle('sel');
-      });
+      function redrawMuscles() {
+        const muscleList = DB.muscleGroups();
+        $('#f-muscles', m).innerHTML = muscleList.map(mg => `<button type="button" class="filter-chip ${muscles.has(mg.name) ? 'sel' : ''}" data-mu="${esc(mg.name)}">${esc(mg.name)}</button>`).join('')
+          + `<button type="button" class="filter-chip add" data-add-mu>+ Neu</button>`;
+        $$('[data-mu]', m).forEach(b => b.onclick = () => {
+          muscles.has(b.dataset.mu) ? muscles.delete(b.dataset.mu) : muscles.add(b.dataset.mu);
+          redrawMuscles();
+        });
+        $('[data-add-mu]', m).onclick = () => quickAddMuscleGroup(name => { muscles.add(name); redrawMuscles(); });
+      }
+      redrawMuscles();
       function redrawEquip() {
         const equipList = DB.equipmentTypes();
         $('#f-equip', m).innerHTML = equipList.map(eq => `<button type="button" class="filter-chip ${equipment === eq.name ? 'sel' : ''}" data-e="${esc(eq.name)}">${esc(eq.name)}</button>`).join('')
@@ -839,6 +863,92 @@ function manageEquipmentModal() {
   });
 }
 
+// Kleiner, gestapelter Dialog um schnell eine neue Muskelgruppe anzulegen
+// (z.B. direkt beim Taggen einer Übung, ohne den aktuellen Dialog zu verlassen).
+function quickAddMuscleGroup(onAdded) {
+  openModal({
+    title: 'Neue Muskelgruppe',
+    body: `<label class="field"><span>Name</span><input id="f-mgname" placeholder="z.B. Nacken" /></label>`,
+    footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Anlegen</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        const name = $('#f-mgname', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        const mg = DB.addMuscleGroup(name);
+        close();
+        onAdded(mg.name);
+      };
+      $('#f-mgname', m).focus();
+    },
+  });
+}
+
+// Muskelgruppen verwalten: anlegen, umbenennen (mit Übernahme bei allen
+// betroffenen Übungen) und löschen (entfernt das Tag bei betroffenen Übungen,
+// die Übung selbst bleibt erhalten).
+function manageMuscleGroupsModal() {
+  let editingId = null;
+  function draw(m) {
+    const list = DB.muscleGroups();
+    const listEl = $('#mgList', m);
+    listEl.innerHTML = list.length ? list.map(mg => {
+      const uses = DB.muscleGroupUsage(mg.id);
+      if (editingId === mg.id) {
+        return `<div class="list-row" data-mg="${mg.id}">
+          <input id="f-mgrename-${mg.id}" value="${esc(mg.name)}" style="flex:1" />
+          <button class="btn ghost sm" data-save="${mg.id}">✓</button>
+          <button class="btn ghost sm" data-cancel="${mg.id}">✕</button>
+        </div>`;
+      }
+      return `<div class="list-row" data-mg="${mg.id}">
+        <div class="grow"><div class="r-title">${esc(mg.name)}</div><div class="r-sub">${uses ? uses + '× verwendet' : 'unbenutzt'}</div></div>
+        <button class="btn ghost sm" data-rename="${mg.id}">✏️</button>
+        <button class="btn ghost sm" data-del="${mg.id}">🗑️</button>
+      </div>`;
+    }).join('') : `<div class="tiny muted center" style="padding:10px">Noch keine Muskelgruppen.</div>`;
+
+    $$('[data-rename]', listEl).forEach(b => b.onclick = () => { editingId = b.dataset.rename; draw(m); });
+    $$('[data-cancel]', listEl).forEach(b => b.onclick = () => { editingId = null; draw(m); });
+    $$('[data-save]', listEl).forEach(b => b.onclick = () => {
+      const rid = b.dataset.save;
+      const val = $(`#f-mgrename-${rid}`, listEl).value.trim();
+      if (val) DB.renameMuscleGroup(rid, val);
+      editingId = null; draw(m);
+    });
+    $$('[data-del]', listEl).forEach(b => b.onclick = async () => {
+      const rid = b.dataset.del; const mg = DB.getMuscleGroup(rid); const uses = DB.muscleGroupUsage(rid);
+      const warn = uses ? `„${mg.name}" wird bei ${uses} Übung(en) verwendet. Beim Löschen wird das Tag dort entfernt (Übung bleibt erhalten). Trotzdem löschen?` : `„${mg.name}" löschen?`;
+      if (await confirmDialog(warn, { danger: true, okText: 'Löschen' })) { DB.deleteMuscleGroup(rid); draw(m); }
+    });
+  }
+  openModal({
+    title: 'Muskelgruppen verwalten',
+    body: `<div class="btn-row" style="margin-bottom:12px">
+        <input id="f-newMg" placeholder="Neue Muskelgruppe, z.B. Nacken" style="flex:1" />
+        <button class="btn primary" id="addMgBtn">+ Anlegen</button>
+      </div>
+      <div id="mgList"></div>`,
+    footer: `<button class="btn ghost" data-x>Fertig</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = () => {
+        close();
+        const validNames = new Set(DB.muscleGroups().map(mg => mg.name));
+        [...libFilter.muscles].forEach(n => { if (!validNames.has(n)) libFilter.muscles.delete(n); });
+        render();
+      };
+      $('#addMgBtn', m).onclick = () => {
+        const name = $('#f-newMg', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        DB.addMuscleGroup(name);
+        $('#f-newMg', m).value = '';
+        draw(m);
+      };
+      draw(m);
+    },
+  });
+}
+
 // ============================================================
 //  Ansicht: Aktives Training
 // ============================================================
@@ -904,7 +1014,7 @@ function renderTrain(container, id) {
   $('#addEx', container).onclick = () => pickExerciseModal(exId => {
     const ex = DB.getExercise(exId);
     const s2 = DB.getSession(id);
-    s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: 10, targetSets: 3, restSec: DB.db().settings.defaultRestSec, sets: [{ weight: '', reps: '', done: false }] });
+    s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: 10, targetSets: 3, restSec: DB.db().settings.defaultRestSec, note: '', sets: [{ weight: '', reps: '', done: false }] });
     DB.save(); renderTrain(container, id);
   });
 
@@ -961,19 +1071,19 @@ function renderEntries(container, id) {
     // "letztes Mal" nur vom selben Ort (Geräte sind zwischen Gyms nicht vergleichbar).
     // Werte erscheinen als Platzhalter in den Feldern – daher keine separate Zeile mehr.
     const last = DB.lastEntryFor(entry.exerciseId, id, s.locationId);
+    const ex = DB.getExercise(entry.exerciseId);
+    const badges = tagBadgesHTML(ex);
+    const noteHTML = entry.note ? `<div class="ex-note">📝 ${esc(entry.note)}</div>` : '';
     const block = el('div', { class: 'ex-block' });
     block.innerHTML = `
       <div class="ex-head">
         <div class="ex-name">${esc(entry.name)}</div>
-        <button class="btn ghost sm" data-rest>⏱ ${entry.restSec}s</button>
-        <button class="btn ghost sm" data-rmex>🗑️</button>
+        <button class="btn ghost sm" data-menu>⋮</button>
       </div>
+      ${(badges || noteHTML) ? `<div class="ex-meta">${badges}${noteHTML}</div>` : ''}
       <div class="ex-body">
         <div class="set-head"><span>#</span><span>Gewicht</span><span>Wdh.</span><span>✓</span><span></span></div>
         <div class="sets"></div>
-        <div class="ex-actions">
-          <button class="btn sm" data-addset>+ Satz</button>
-        </div>
       </div>`;
 
     const setsEl = $('.sets', block);
@@ -1005,18 +1115,65 @@ function renderEntries(container, id) {
       setsEl.append(row);
     });
 
-    $('[data-addset]', block).onclick = () => {
-      const prev = entry.sets[entry.sets.length - 1];
-      entry.sets.push({ weight: prev ? prev.weight : '', reps: prev ? prev.reps : '', done: false });
-      DB.save(); renderEntries(container, id);
-    };
-    $('[data-rest]', block).onclick = () => editRestModal(entry, () => renderEntries(container, id));
-    $('[data-rmex]', block).onclick = async () => {
-      if (await confirmDialog('Übung aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
-        s.entries.splice(ei, 1); DB.save(); renderEntries(container, id);
-      }
-    };
+    $('[data-menu]', block).onclick = () => exerciseMenuModal(entry, {
+      onAddSet: () => {
+        const prev = entry.sets[entry.sets.length - 1];
+        entry.sets.push({ weight: prev ? prev.weight : '', reps: prev ? prev.reps : '', done: false });
+        DB.save(); renderEntries(container, id);
+      },
+      onRemoveSet: () => {
+        if (!entry.sets.length) return;
+        entry.sets.pop(); DB.save(); renderEntries(container, id);
+      },
+      onRest: () => editRestModal(entry, () => renderEntries(container, id)),
+      onNote: () => editNoteModal(entry, () => renderEntries(container, id)),
+      onRemoveExercise: async () => {
+        if (await confirmDialog('Übung aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
+          s.entries.splice(ei, 1); DB.save(); renderEntries(container, id);
+        }
+      },
+    });
     wrap.append(block);
+  });
+}
+
+// Kompaktes Aktions-Menü für eine Übung im laufenden Training (ersetzt die
+// vorherigen Einzel-Buttons für Pause/Löschen -> schlankerer Übungskopf).
+function exerciseMenuModal(entry, actions) {
+  openModal({
+    title: entry.name,
+    body: `<div class="sheet">
+      <button class="sheet-btn" data-act="rest">⏱ Pause ändern <span class="tiny muted">(aktuell ${entry.restSec}s)</span></button>
+      <button class="sheet-btn" data-act="addset">＋ Satz hinzufügen</button>
+      <button class="sheet-btn" data-act="rmset">－ Letzten Satz entfernen</button>
+      <button class="sheet-btn" data-act="note">📝 ${entry.note ? 'Notiz bearbeiten' : 'Notiz hinzufügen'}</button>
+      <button class="sheet-btn danger" data-act="remove">🗑️ Übung aus Training entfernen</button>
+    </div>`,
+    footer: `<button class="btn ghost block" data-x>Abbrechen</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('[data-act="rest"]', m).onclick = () => { close(); actions.onRest(); };
+      $('[data-act="addset"]', m).onclick = () => { close(); actions.onAddSet(); };
+      $('[data-act="rmset"]', m).onclick = () => { close(); actions.onRemoveSet(); };
+      $('[data-act="note"]', m).onclick = () => { close(); actions.onNote(); };
+      $('[data-act="remove"]', m).onclick = () => { close(); actions.onRemoveExercise(); };
+    },
+  });
+}
+
+// Notiz zu einer Übung innerhalb dieses Trainings (nur sichtbar, wenn gesetzt).
+function editNoteModal(entry, after) {
+  openModal({
+    title: 'Notiz',
+    body: `<label class="field"><span>Notiz zu dieser Übung (nur für dieses Training)</span>
+      <textarea id="f-exnote" placeholder="z.B. Schulter zwickt, Griff geändert …">${esc(entry.note || '')}</textarea></label>`,
+    footer: `${entry.note ? '<button class="btn danger" data-del>Entfernen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => { entry.note = $('#f-exnote', m).value.trim(); DB.save(); close(); after && after(); };
+      const del = $('[data-del]', m);
+      if (del) del.onclick = () => { entry.note = ''; DB.save(); close(); after && after(); };
+    },
   });
 }
 
@@ -1375,6 +1532,14 @@ route('/settings', () => {
         <span style="margin:0">Ton/Vibration am Pausenende</span></label>
     </div>
 
+    <div class="section-title">Anzeige</div>
+    <div class="card">
+      <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
+        <input id="s-tagcolors" type="checkbox" ${s.tagColors ? 'checked' : ''} style="width:auto" />
+        <span style="margin:0">Farbige Muskel-/Geräte-Labels</span></label>
+      <p class="tiny muted" style="margin:8px 0 0">Muskelgruppen in Blau, Geräte-Arten in Grün – in Bibliothek und Training. Ausgeschaltet erscheinen alle Labels neutral grau.</p>
+    </div>
+
     <div class="section-title">Daten & Backup</div>
     <div class="card">
       <p class="tiny muted" style="margin-top:0">Alle Daten liegen <b>lokal auf diesem Gerät</b> (im Browser). Es gibt keinen Server. Erstelle regelmäßig ein Backup!</p>
@@ -1395,6 +1560,7 @@ route('/settings', () => {
 
   $('#s-rest', appEl).onchange = e => { s.defaultRestSec = Math.max(0, parseInt(e.target.value) || 0); DB.save(); };
   $('#s-sound', appEl).onchange = e => { s.soundOnRestEnd = e.target.checked; DB.save(); };
+  $('#s-tagcolors', appEl).onchange = e => { s.tagColors = e.target.checked; DB.save(); };
 
   $('#expBtn', appEl).onclick = () => {
     const blob = new Blob([DB.exportData()], { type: 'application/json' });
@@ -1420,92 +1586,203 @@ route('/settings', () => {
   };
 });
 
-// ---------- Startinhalt: Übungsbibliothek + Sports Club Kiel (Push/Pull/Legs) ----------
+// ---------- Startinhalt: Übungsbibliothek + Sports Club Kiel (3 Pläne) ----------
 // Läuft einmalig (siehe SEED_VERSION-Migration unten) – reine Struktur, keine
 // erfundene Trainingshistorie, damit sofort echt trainiert werden kann.
+// Namen enthalten das Gerät NICHT mehr in Klammern (steht jetzt als eigenes,
+// farbiges Label unter der Übung) - Klammer-Zusätze bleiben nur für echte
+// Bewegungs-/Griff-Varianten (z.B. "(breiter Griff)", "(Brust-Fokus)") erhalten.
 const LIBRARY_EXERCISES = [
   // Brust
-  { name: 'Bankdrücken (Langhantel)', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Langhantel' },
-  { name: 'Schrägbankdrücken (Kurzhantel)', muscles: ['Brust', 'Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
-  { name: 'Kurzhantel-Bankdrücken (flach)', muscles: ['Brust', 'Trizeps'], equipment: 'Kurzhantel' },
-  { name: 'Butterfly (Maschine)', muscles: ['Brust'], equipment: 'Maschine' },
+  { name: 'Bankdrücken', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Langhantel' },
+  { name: 'Bankdrücken Multipresse', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Maschine' },
+  { name: 'Kurzhantel-Bankdrücken', muscles: ['Brust', 'Trizeps'], equipment: 'Kurzhantel' },
+  { name: 'Schrägbankdrücken', muscles: ['Brust', 'Schultern', 'Trizeps'], equipment: 'Langhantel' },
+  { name: 'Kurzhantel-Schrägbankdrücken', muscles: ['Brust', 'Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
+  { name: 'Negativ-Bankdrücken', muscles: ['Brust', 'Trizeps'], equipment: 'Langhantel' },
+  { name: 'Butterfly', muscles: ['Brust'], equipment: 'Maschine' },
   { name: 'Kabelzug über Kreuz', muscles: ['Brust'], equipment: 'Kabelzug' },
   { name: 'Dips (Brust-Fokus)', muscles: ['Brust', 'Trizeps'], equipment: 'Körpergewicht' },
   { name: 'Liegestütze', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Körpergewicht' },
+  { name: 'Diamond-Liegestütze', muscles: ['Trizeps', 'Brust'], equipment: 'Körpergewicht' },
   // Rücken
-  { name: 'Kreuzheben (Langhantel)', muscles: ['Rücken', 'Gesäß', 'Beinbeuger', 'Ganzkörper'], equipment: 'Langhantel' },
+  { name: 'Kreuzheben', muscles: ['Rücken', 'Gesäß', 'Beinbeuger', 'Ganzkörper'], equipment: 'Langhantel' },
+  { name: 'Sumo-Kreuzheben', muscles: ['Gesäß', 'Beinbeuger', 'Rücken'], equipment: 'Langhantel' },
   { name: 'Rumänisches Kreuzheben', muscles: ['Beinbeuger', 'Gesäß', 'Rücken'], equipment: 'Langhantel' },
   { name: 'Klimmzüge', muscles: ['Rücken', 'Bizeps'], equipment: 'Körpergewicht' },
+  { name: 'Enge Klimmzüge', muscles: ['Rücken', 'Bizeps'], equipment: 'Körpergewicht' },
   { name: 'Latzug (breiter Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
   { name: 'Latzug (enger Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
-  { name: 'Rudern vorgebeugt (Langhantel)', muscles: ['Rücken', 'Bizeps'], equipment: 'Langhantel' },
-  { name: 'Kabelrudern sitzend', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { name: 'Latzug (neutraler Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { name: 'Rudern vorgebeugt', muscles: ['Rücken', 'Bizeps'], equipment: 'Langhantel' },
+  { name: 'Einarmiges Rudern', muscles: ['Rücken', 'Bizeps'], equipment: 'Kurzhantel' },
   { name: 'T-Bar Rudern', muscles: ['Rücken'], equipment: 'Maschine' },
-  { name: 'Rückenstrecker (Hyperextension)', muscles: ['Rücken', 'Gesäß'], equipment: 'Körpergewicht' },
+  { name: 'Kabelrudern sitzend (weiter Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { name: 'Kabelrudern sitzend (enger Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { name: 'Rückenstrecker', muscles: ['Rücken', 'Gesäß'], equipment: 'Körpergewicht' },
   { name: 'Facepulls', muscles: ['Schultern', 'Rücken'], equipment: 'Kabelzug' },
+  { name: 'Reverse Butterfly', muscles: ['Schultern', 'Rücken'], equipment: 'Maschine' },
   // Schultern
-  { name: 'Schulterdrücken (Langhantel)', muscles: ['Schultern', 'Trizeps'], equipment: 'Langhantel' },
-  { name: 'Schulterdrücken (Kurzhantel)', muscles: ['Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
-  { name: 'Schulterdrücken (Maschine)', muscles: ['Schultern'], equipment: 'Maschine' },
-  { name: 'Seitheben (Kurzhantel)', muscles: ['Schultern'], equipment: 'Kurzhantel' },
+  { name: 'Schulterdrücken', muscles: ['Schultern', 'Trizeps'], equipment: 'Langhantel' },
+  { name: 'Kurzhantel-Schulterdrücken', muscles: ['Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
+  { name: 'Schulterdrücken Maschine', muscles: ['Schultern', 'Trizeps'], equipment: 'Maschine' },
+  { name: 'Arnold Press', muscles: ['Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
+  { name: 'Seitheben', muscles: ['Schultern'], equipment: 'Kurzhantel' },
+  { name: 'Seitheben am Kabel', muscles: ['Schultern'], equipment: 'Kabelzug' },
   { name: 'Frontheben', muscles: ['Schultern'], equipment: 'Kurzhantel' },
-  { name: 'Reverse Butterfly (hintere Schulter)', muscles: ['Schultern', 'Rücken'], equipment: 'Maschine' },
   { name: 'Aufrechtes Rudern', muscles: ['Schultern', 'Rücken'], equipment: 'Langhantel' },
   // Arme
-  { name: 'Bizepscurls (Langhantel)', muscles: ['Bizeps'], equipment: 'Langhantel' },
-  { name: 'Bizepscurls (Kurzhantel)', muscles: ['Bizeps'], equipment: 'Kurzhantel' },
+  { name: 'Bizepscurls', muscles: ['Bizeps'], equipment: 'Langhantel' },
+  { name: 'Kurzhantel-Bizepscurls', muscles: ['Bizeps'], equipment: 'Kurzhantel' },
+  { name: 'Kabel-Bizepscurls', muscles: ['Bizeps'], equipment: 'Kabelzug' },
   { name: 'Hammercurls', muscles: ['Bizeps', 'Unterarme'], equipment: 'Kurzhantel' },
   { name: 'Konzentrationscurls', muscles: ['Bizeps'], equipment: 'Kurzhantel' },
-  { name: 'Trizepsdrücken am Kabel (Pushdown)', muscles: ['Trizeps'], equipment: 'Kabelzug' },
+  { name: 'Scott-Curls', muscles: ['Bizeps'], equipment: 'Langhantel' },
+  { name: 'Trizepsdrücken am Kabel', muscles: ['Trizeps'], equipment: 'Kabelzug' },
   { name: 'Trizeps-Überkopfstrecken', muscles: ['Trizeps'], equipment: 'Kurzhantel' },
+  { name: 'French Press', muscles: ['Trizeps'], equipment: 'Langhantel' },
   { name: 'Enges Bankdrücken', muscles: ['Trizeps', 'Brust'], equipment: 'Langhantel' },
   { name: 'Dips (Trizeps-Fokus)', muscles: ['Trizeps'], equipment: 'Körpergewicht' },
-  { name: 'Unterarmcurls (Wrist Curls)', muscles: ['Unterarme'], equipment: 'Kurzhantel' },
+  { name: 'Unterarmcurls', muscles: ['Unterarme'], equipment: 'Kurzhantel' },
+  { name: 'Reverse Curls', muscles: ['Unterarme', 'Bizeps'], equipment: 'Langhantel' },
   // Beine
-  { name: 'Kniebeuge (Langhantel)', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Langhantel' },
+  { name: 'Kniebeuge', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Langhantel' },
+  { name: 'Frontkniebeuge', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Langhantel' },
+  { name: 'Kniebeuge Multipresse', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Maschine' },
   { name: 'Beinpresse', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Maschine' },
-  { name: 'Ausfallschritte (Kurzhantel)', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
-  { name: 'Beinstrecker (Maschine)', muscles: ['Quadrizeps'], equipment: 'Maschine' },
-  { name: 'Beinbeuger liegend (Maschine)', muscles: ['Beinbeuger'], equipment: 'Maschine' },
-  { name: 'Beinbeuger sitzend (Maschine)', muscles: ['Beinbeuger'], equipment: 'Maschine' },
+  { name: 'Ausfallschritte', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
+  { name: 'Bulgarian Split Squat', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
+  { name: 'Beinstrecker', muscles: ['Quadrizeps'], equipment: 'Maschine' },
+  { name: 'Beinbeuger liegend', muscles: ['Beinbeuger'], equipment: 'Maschine' },
+  { name: 'Beinbeuger sitzend', muscles: ['Beinbeuger'], equipment: 'Maschine' },
   { name: 'Hüftstoßen (Hip Thrust)', muscles: ['Gesäß'], equipment: 'Langhantel' },
+  { name: 'Abduktion (Hüfte)', muscles: ['Gesäß'], equipment: 'Maschine' },
+  { name: 'Adduktion (Hüfte)', muscles: ['Gesäß'], equipment: 'Maschine' },
   { name: 'Wadenheben stehend', muscles: ['Waden'], equipment: 'Maschine' },
   { name: 'Wadenheben sitzend', muscles: ['Waden'], equipment: 'Maschine' },
   { name: 'Goblet Squat', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
   // Bauch
   { name: 'Crunches', muscles: ['Bauch'], equipment: 'Körpergewicht' },
-  { name: 'Plank (Unterarmstütz)', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { name: 'Plank', muscles: ['Bauch'], equipment: 'Körpergewicht' },
   { name: 'Beinheben hängend', muscles: ['Bauch'], equipment: 'Körpergewicht' },
   { name: 'Kabel-Crunches', muscles: ['Bauch'], equipment: 'Kabelzug' },
   { name: 'Russian Twist', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { name: 'Sit-ups', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { name: 'Ab Wheel Rollout', muscles: ['Bauch', 'Ganzkörper'], equipment: 'Sonstiges' },
+  // Ganzkörper
+  { name: 'Kettlebell Swing', muscles: ['Gesäß', 'Beinbeuger', 'Ganzkörper'], equipment: 'Kettlebell' },
+  { name: 'Farmers Walk', muscles: ['Ganzkörper', 'Unterarme'], equipment: 'Kurzhantel' },
 ];
 
 // Push/Pull/Legs-Zielwerte (Sätze/Wdh./Pause), an Hypertrophie-/Kraft-Richtwerten
 // orientiert: Grundübungen 4-6 Wdh. mit langer Pause, Isolation 10-15 Wdh. kürzer.
 const PPL_PLAN = {
   Push: { emoji: '🔴', color: '#ff6b6b', exercises: [
-    ['Bankdrücken (Langhantel)', 4, 7, 150],
-    ['Schrägbankdrücken (Kurzhantel)', 3, 9, 120],
-    ['Schulterdrücken (Langhantel)', 3, 9, 120],
-    ['Seitheben (Kurzhantel)', 3, 14, 60],
+    ['Bankdrücken', 4, 7, 150],
+    ['Kurzhantel-Schrägbankdrücken', 3, 9, 120],
+    ['Schulterdrücken', 3, 9, 120],
+    ['Seitheben', 3, 14, 60],
     ['Dips (Brust-Fokus)', 3, 10, 90],
-    ['Trizepsdrücken am Kabel (Pushdown)', 3, 11, 60],
+    ['Trizepsdrücken am Kabel', 3, 11, 60],
   ] },
   Pull: { emoji: '🔵', color: '#4cc9f0', exercises: [
-    ['Kreuzheben (Langhantel)', 3, 5, 180],
+    ['Kreuzheben', 3, 5, 180],
     ['Klimmzüge', 3, 8, 120],
-    ['Rudern vorgebeugt (Langhantel)', 3, 9, 120],
-    ['Kabelrudern sitzend', 3, 11, 90],
+    ['Rudern vorgebeugt', 3, 9, 120],
+    ['Kabelrudern sitzend (weiter Griff)', 3, 11, 90],
     ['Facepulls', 3, 17, 60],
-    ['Bizepscurls (Langhantel)', 3, 11, 60],
+    ['Bizepscurls', 3, 11, 60],
   ] },
   Legs: { emoji: '🟢', color: '#46c98b', exercises: [
-    ['Kniebeuge (Langhantel)', 4, 7, 180],
+    ['Kniebeuge', 4, 7, 180],
     ['Beinpresse', 3, 11, 120],
     ['Rumänisches Kreuzheben', 3, 9, 120],
-    ['Ausfallschritte (Kurzhantel)', 3, 11, 90],
-    ['Beinbeuger liegend (Maschine)', 3, 11, 90],
+    ['Ausfallschritte', 3, 11, 90],
+    ['Beinbeuger liegend', 3, 11, 90],
     ['Wadenheben stehend', 4, 14, 60],
+  ] },
+};
+
+// Push/Pull/Legs mit A/B-Tagen (6 Tage, zweimal pro Woche pro Kategorie mit
+// unterschiedlicher Übungsauswahl für mehr Abwechslung/Übungsvielfalt).
+const PPL_AB_PLAN = {
+  'Push A': { emoji: '🔴A', color: '#ff6b6b', exercises: [
+    ['Bankdrücken', 4, 7, 150],
+    ['Kurzhantel-Schulterdrücken', 3, 9, 120],
+    ['Kurzhantel-Schrägbankdrücken', 3, 11, 100],
+    ['Seitheben', 3, 14, 60],
+    ['Trizepsdrücken am Kabel', 3, 11, 60],
+    ['Dips (Brust-Fokus)', 3, 10, 90],
+  ] },
+  'Push B': { emoji: '🔴B', color: '#ff6b6b', exercises: [
+    ['Schrägbankdrücken', 4, 7, 150],
+    ['Schulterdrücken', 3, 9, 120],
+    ['Bankdrücken Multipresse', 3, 11, 100],
+    ['Frontheben', 3, 14, 60],
+    ['Enges Bankdrücken', 3, 8, 100],
+    ['Trizeps-Überkopfstrecken', 3, 11, 60],
+  ] },
+  'Pull A': { emoji: '🔵A', color: '#4cc9f0', exercises: [
+    ['Kreuzheben', 3, 5, 180],
+    ['Klimmzüge', 3, 8, 120],
+    ['Rudern vorgebeugt', 3, 9, 120],
+    ['Kabelrudern sitzend (enger Griff)', 3, 11, 90],
+    ['Facepulls', 3, 17, 60],
+    ['Bizepscurls', 3, 11, 60],
+  ] },
+  'Pull B': { emoji: '🔵B', color: '#4cc9f0', exercises: [
+    ['Rumänisches Kreuzheben', 3, 9, 150],
+    ['Latzug (breiter Griff)', 3, 9, 120],
+    ['T-Bar Rudern', 3, 9, 120],
+    ['Reverse Butterfly', 3, 14, 60],
+    ['Hammercurls', 3, 11, 60],
+    ['Kurzhantel-Bizepscurls', 3, 11, 60],
+  ] },
+  'Legs A': { emoji: '🟢A', color: '#46c98b', exercises: [
+    ['Kniebeuge', 4, 7, 180],
+    ['Beinpresse', 3, 11, 120],
+    ['Beinbeuger liegend', 3, 11, 90],
+    ['Ausfallschritte', 3, 11, 90],
+    ['Wadenheben stehend', 4, 14, 60],
+  ] },
+  'Legs B': { emoji: '🟢B', color: '#46c98b', exercises: [
+    ['Kniebeuge Multipresse', 4, 9, 150],
+    ['Bulgarian Split Squat', 3, 11, 90],
+    ['Beinstrecker', 3, 14, 90],
+    ['Hüftstoßen (Hip Thrust)', 3, 11, 120],
+    ['Wadenheben sitzend', 4, 18, 60],
+  ] },
+};
+
+// "Beedle"-Plan: 1:1 aus dem mitgebrachten eigenen Trainingsplan übernommen
+// (Push/Pull/Beine), Übungen auf die Bibliothek gemappt.
+const BEEDLE_PLAN = {
+  Push: { emoji: '🥊', color: '#f72585', exercises: [
+    ['Bankdrücken', 3, 8, 120],
+    ['Schrägbankdrücken', 3, 10, 100],
+    ['Kurzhantel-Schrägbankdrücken', 3, 10, 100],
+    ['Butterfly', 3, 12, 60],
+    ['Schulterdrücken', 3, 10, 100],
+    ['Seitheben', 3, 12, 60],
+    ['Trizepsdrücken am Kabel', 3, 12, 60],
+    ['Trizeps-Überkopfstrecken', 3, 12, 60],
+  ] },
+  Pull: { emoji: '🪢', color: '#c77dff', exercises: [
+    ['Kreuzheben', 3, 6, 150],
+    ['Latzug (breiter Griff)', 3, 10, 100],
+    ['Kabelrudern sitzend (weiter Griff)', 3, 10, 100],
+    ['Reverse Butterfly', 3, 12, 60],
+    ['T-Bar Rudern', 3, 10, 100],
+    ['Bizepscurls', 3, 10, 60],
+    ['Kurzhantel-Bizepscurls', 3, 10, 60],
+  ] },
+  Beine: { emoji: '🦶', color: '#ffb454', exercises: [
+    ['Kniebeuge', 3, 8, 120],
+    ['Beinpresse', 3, 10, 100],
+    ['Beinbeuger liegend', 3, 10, 90],
+    ['Beinstrecker', 3, 12, 90],
+    ['Abduktion (Hüfte)', 3, 14, 60],
+    ['Wadenheben stehend', 3, 14, 60],
   ] },
 };
 
@@ -1514,15 +1791,23 @@ function seedInitialContent() {
   LIBRARY_EXERCISES.forEach(e => { byName.set(e.name, DB.addExercise(e)); });
 
   const loc = DB.addLocation({ name: 'Sports Club Kiel', emoji: '🏋️', color: COLORS[0] });
-  const plan = DB.addPlan({ locationId: loc.id, name: 'Push Pull Legs', emoji: '🔄', color: COLORS[0] });
 
-  Object.entries(PPL_PLAN).forEach(([dayName, cfg]) => {
-    const day = DB.addDay({ planId: plan.id, name: dayName, emoji: cfg.emoji, color: cfg.color });
-    cfg.exercises.forEach(([exName, sets, reps, restSec]) => {
-      const ex = byName.get(exName);
-      if (ex) DB.addExerciseToDay(day.id, ex.id, { sets, reps, restSec });
+  const buildPlan = (planName, planEmoji, dayConfig) => {
+    const plan = DB.addPlan({ locationId: loc.id, name: planName, emoji: planEmoji, color: COLORS[0] });
+    Object.entries(dayConfig).forEach(([dayName, cfg]) => {
+      const day = DB.addDay({ planId: plan.id, name: dayName, emoji: cfg.emoji, color: cfg.color });
+      cfg.exercises.forEach(([exName, sets, reps, restSec]) => {
+        const ex = byName.get(exName);
+        if (ex) DB.addExerciseToDay(day.id, ex.id, { sets, reps, restSec });
+      });
     });
-  });
+    return plan;
+  };
+
+  buildPlan('Push Pull Legs', '🔄', PPL_PLAN);
+  buildPlan('Push Pull Legs (A/B)', '🔁', PPL_AB_PLAN);
+  buildPlan('Beedle', '📓', BEEDLE_PLAN);
+
   DB.setActiveLocation(loc.id);
 }
 

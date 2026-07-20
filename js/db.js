@@ -11,19 +11,19 @@ const KEY = 'trainingsplan.v1';
 // Push/Pull/Legs + Übungsbibliothek) neu befüllt. wipeAll() setzt seedVersion
 // direkt auf SEED_VERSION, damit ein manuelles "Alle Daten löschen" NICHT erneut
 // automatisch befüllt wird (nur diese eine automatische Migration tut das).
-export const SEED_VERSION = 2;
+export const SEED_VERSION = 3;
 
-// Feste Vokabular für Muskelgruppen (Anatomie ändert sich nicht -> nicht verwaltbar).
-export const MUSCLE_GROUPS = ['Brust', 'Rücken', 'Schultern', 'Bizeps', 'Trizeps', 'Unterarme', 'Quadrizeps', 'Beinbeuger', 'Gesäß', 'Waden', 'Bauch', 'Ganzkörper'];
-
-// Geräte-Arten sind dagegen selbst verwaltbar (siehe equipmentTypes() u.a. unten) -
-// diese Liste ist nur der Startbestand für neue/bestehende Installationen.
-const DEFAULT_EQUIPMENT = ['Langhantel', 'Kurzhantel', 'Maschine', 'Kabelzug', 'Körpergewicht', 'Sonstiges'];
+// Muskelgruppen UND Geräte-Arten sind beide selbst verwaltbar (siehe
+// muscleGroups()/equipmentTypes() u.a. unten) - diese Listen sind nur der
+// Startbestand für neue/bestehende Installationen.
+const DEFAULT_MUSCLES = ['Brust', 'Rücken', 'Schultern', 'Bizeps', 'Trizeps', 'Unterarme', 'Quadrizeps', 'Beinbeuger', 'Gesäß', 'Waden', 'Bauch', 'Ganzkörper'];
+const DEFAULT_EQUIPMENT = ['Langhantel', 'Kurzhantel', 'Maschine', 'Kabelzug', 'Körpergewicht', 'Kettlebell', 'Sonstiges'];
 
 const DEFAULTS = () => ({
   version: 1,
-  settings: { defaultRestSec: 90, soundOnRestEnd: true, seedVersion: 0 },
+  settings: { defaultRestSec: 90, soundOnRestEnd: true, seedVersion: 0, tagColors: true },
   exercises: [],   // Bibliothek: {id,name,muscles[],equipment,notes,unit,createdAt}
+  muscleGroups: DEFAULT_MUSCLES.map(name => ({ id: uid('mg'), name, createdAt: Date.now() })),   // {id,name,createdAt}
   equipmentTypes: DEFAULT_EQUIPMENT.map(name => ({ id: uid('eq'), name, createdAt: Date.now() })), // {id,name,createdAt}
   locations: [],   // Orte:        {id,name,emoji,color,createdAt}
   plans: [],       // Pläne:       {id,locationId,name,emoji,color,createdAt}
@@ -83,6 +83,39 @@ export function deleteExercise(id) {
 // Wie oft wurde eine Übung in Einheiten genutzt (für Löschwarnung)
 export function exerciseUsage(id) {
   return db().sessions.filter(s => (s.entries || []).some(e => e.exerciseId === id)).length;
+}
+
+// ---------- Muskelgruppen (selbst verwaltbar, für Filter + Übungs-Tagging) ----------
+export function muscleGroups() { return db().muscleGroups.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')); }
+export function getMuscleGroup(id) { return db().muscleGroups.find(m => m.id === id) || null; }
+export function addMuscleGroup(name) {
+  name = String(name || '').trim(); if (!name) return null;
+  const existing = db().muscleGroups.find(m => m.name.toLowerCase() === name.toLowerCase());
+  if (existing) return existing;
+  const m = { id: uid('mg'), name, createdAt: Date.now() };
+  db().muscleGroups.push(m); save(); return m;
+}
+export function renameMuscleGroup(id, newName) {
+  newName = String(newName || '').trim(); if (!newName) return;
+  const m = getMuscleGroup(id); if (!m) return;
+  const oldName = m.name;
+  m.name = newName;
+  if (oldName !== newName) {
+    db().exercises.forEach(ex => {
+      if ((ex.muscles || []).includes(oldName)) ex.muscles = ex.muscles.map(x => x === oldName ? newName : x);
+    });
+  }
+  save();
+}
+export function deleteMuscleGroup(id) {
+  const m = getMuscleGroup(id); if (!m) return;
+  db().exercises.forEach(ex => { ex.muscles = (ex.muscles || []).filter(x => x !== m.name); });
+  db().muscleGroups = db().muscleGroups.filter(x => x.id !== id);
+  save();
+}
+export function muscleGroupUsage(id) {
+  const m = getMuscleGroup(id); if (!m) return 0;
+  return db().exercises.filter(ex => (ex.muscles || []).includes(m.name)).length;
 }
 
 // ---------- Geräte-Arten (selbst verwaltbar, für Filter + Übungs-Tagging) ----------
@@ -238,6 +271,7 @@ export function startSession(dayId) {
       targetReps: item.reps,
       targetSets: item.sets,
       restSec: item.restSec,
+      note: '',
       sets,
     };
   });
