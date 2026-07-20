@@ -5,14 +5,15 @@ Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – instal
 
 ## Funktionen
 
-- **Übungsbibliothek** – lege deine Übungen selbst an (Name, Kategorie, Muskelgruppen, Notiz). Wiederverwendbar in allen Plänen.
-- **Hierarchie:** **Ort** (z. B. Fitnessstudio, Zuhause) → **Trainingsplan** → **Trainingstag** → **Übungen**
-- **Orte oben als Reiter** – der aktive Ort filtert die ganze App. **Alle Daten (Statistik, „letztes Mal", Verlauf) sind je Ort getrennt**, weil Geräte zwischen Gyms nicht vergleichbar sind (z. B. Brustpresse 80 kg in Gym A ≙ 50 kg in Gym B). So bleibt „Bankdrücken Gym A" von „Bankdrücken Gym B" sauber getrennt. Das Orts-Kürzel steht klein neben Plan/Trainingstag/Übung.
-- **Training aufzeichnen** – Gewicht & Wiederholungen je Satz eingeben. Klein darunter steht, was du **beim letzten Mal** hattest.
-- **Sätze, Pausen & Übungen anpassbar** – beim Erstellen des Plans **und** während des Trainings (Sätze hinzufügen/entfernen, Pausenzeit ändern, Übungen ergänzen/entfernen).
+- **Übungsbibliothek** – ~48 vorbefüllte Übungen (Name, Muskelgruppen, Gerät, Notiz), **filterbar nach Muskelgruppe und Gerät** (Langhantel/Kurzhantel/Maschine/Kabelzug/Körpergewicht). Ortübergreifend gemeinsam nutzbar – jedes Gym hat z. B. eine Brustpresse, die Übung muss nicht pro Ort neu angelegt werden.
+- **Hierarchie:** **Ort** (z. B. Sports Club Kiel, Zuhause) → **Trainingsplan** → **Trainingstag** → **Übungen**
+- **Orte oben als Reiter** – der aktive Ort filtert die ganze App. **Statistik, „letztes Mal" und Verlauf sind je Ort getrennt**, weil Geräte zwischen Gyms nicht vergleichbar sind (z. B. Brustpresse 80 kg in Gym A ≙ 50 kg in Gym B). Das Orts-Kürzel steht klein neben Plan/Trainingstag/Übung.
+- **Plan in ein anderes Gym übernehmen** – ein Trainingsplan (inkl. aller Trainingstage & Zielwerte) lässt sich per Knopfdruck als unabhängige Kopie an einen anderen Ort kopieren, da das Kerntraining ja gleich bleibt. Original und Kopie sind danach getrennt frei änderbar.
+- **Training aufzeichnen** – Gewicht & Wiederholungen je Satz eingeben, als Platzhalter direkt der letzte Wert (je Ort).
+- **Sätze, Pausen & Übungen anpassbar** – beim Erstellen des Plans **und** während des Trainings. Nach dem Training wird **je Änderung einzeln gefragt**, ob sie in den Trainingsplan übernommen werden soll (z. B. neue Pausenzeit, mehr/weniger Sätze, hinzugefügte/entfernte Übung) – oder nur für diese eine Einheit gilt.
 - **Pausen-Timer** – Countdown nach jedem abgehakten Satz (mit Ton/Vibration).
 - **Notizen** je Trainingseinheit.
-- **Statistiken je Übung** – geschätztes 1RM (Epley), max. Gewicht, Volumen, persönliche Rekorde und ein Verlaufs-Chart.
+- **Statistiken je Übung** – geschätztes 1RM (Epley), max. Gewicht, Volumen, persönliche Rekorde und ein Verlaufs-Chart, je Ort getrennt.
 - **Kalender / Habit-Tracker** – jeder Trainingstag & Plan bekommt ein **Kürzel oder Emoji**, das im Monatskalender erscheint. Plus Wochen-Streak.
 - **Backup** – Export/Import als JSON-Datei.
 
@@ -40,7 +41,8 @@ Die Datei **`standalone.html`** enthält die komplette App in einer einzigen Dat
 2. Die heruntergeladene Datei per **Doppelklick** im Browser öffnen.
 
 Fertig – kein Server, keine Installation. Die Daten werden im Browser gespeichert.
-Unter *Einstellungen → Beispieldaten* kannst du Demo-Inhalte laden.
+Direkt beim ersten Start ist bereits **„Sports Club Kiel"** mit einem
+Push/Pull/Legs-Plan und einer ausführlichen Übungsbibliothek angelegt (siehe unten).
 
 > `standalone.html` wird aus den Quelldateien erzeugt: `node build-standalone.mjs`.
 > Hinweis: Auf `file://` ist die App nicht „installierbar" und nicht offline-cachend
@@ -86,12 +88,21 @@ Danach läuft die App im Vollbild wie eine native App und funktioniert offline.
 
 ## Erste Schritte
 
-1. **Übungen** anlegen (Tab *Übungen*).
-2. Unter *Pläne* einen **Ort** → **Plan** → **Trainingstag** erstellen und Übungen (mit Zielsätzen/Wdh/Pause) zuordnen.
-3. Auf *Start* den Trainingstag mit **▶ Start** beginnen, Gewichte & Wdh. eintragen, Sätze abhaken.
+Direkt nach dem ersten Start ist bereits alles startklar:
+**Sports Club Kiel** (Ort) → **Push Pull Legs** (Plan) → **Push / Pull / Legs** (Trainingstage),
+je mit 6 Übungen und an Hypertrophie-/Kraft-Richtwerten orientierten Ziel-Sätzen/Wdh./Pausen
+(Grundübungen 4-7 Wdh. mit langer Pause, Isolationsübungen 10-15 Wdh. kürzer). Passe die Zielwerte
+gern an dein Niveau an.
+
+1. Auf *Start* einen Trainingstag mit **▶ Start** beginnen, Gewichte & Wdh. eintragen, Sätze abhaken.
+2. Trainierst du auch an einem zweiten Ort? Oben auf **＋** einen neuen Ort anlegen, dann den
+   bestehenden Plan per **📤** (im Plan oben) dorthin kopieren – die Kopie ist danach unabhängig
+   änderbar.
+3. Fehlende Übungen unter *Übungen* selbst ergänzen (Muskelgruppe + Gerät angeben, damit die
+   Filter greifen).
 4. Fortschritt unter *Statistik* und *Kalender* verfolgen.
 
-> Tipp: Unter *Einstellungen → Beispieldaten* kannst du Demo-Inhalte laden, um alles auszuprobieren.
+> Zum kompletten Zurücksetzen: *Einstellungen → Alle Daten löschen*.
 
 ## Projektstruktur
 

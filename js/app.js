@@ -418,13 +418,44 @@ function editPlanModal(id, locationId) {
   });
 }
 
+// Plan (inkl. aller Trainingstage) als unabhängige Kopie an einen anderen Ort
+// übernehmen. Übungen werden nicht dupliziert (gemeinsame Bibliothek) –
+// nur Statistik/"letztes Mal" bleiben je Ort weiterhin getrennt.
+function copyPlanToLocationModal(planId) {
+  const p = DB.getPlan(planId);
+  const targets = DB.locations().filter(l => l.id !== p.locationId);
+  if (!targets.length) return toast('Kein weiterer Ort vorhanden – lege zuerst einen zweiten Ort an.');
+  openModal({
+    title: 'Plan kopieren nach …',
+    body: `<p class="tiny muted" style="margin-top:0">„${esc(p.name)}" wird inkl. aller Trainingstage als unabhängige Kopie angelegt – Änderungen an der Kopie wirken sich nicht auf das Original aus.</p>
+      <div>${targets.map(l => `<div class="list-row" data-target="${l.id}">
+        <div class="chip" style="background:${esc(l.color)}22;color:${esc(l.color)}">${esc(l.emoji)}</div>
+        <div class="grow"><div class="r-title">${esc(l.name)}</div></div><span class="arrow">›</span></div>`).join('')}</div>`,
+    footer: `<button class="btn ghost" data-x>Abbrechen</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $$('[data-target]', m).forEach(n => n.onclick = () => {
+        const targetId = n.dataset.target;
+        const newPlan = DB.copyPlanToLocation(planId, targetId);
+        close();
+        DB.setActiveLocation(targetId);
+        toast(`Kopiert nach ${DB.getLocation(targetId).name}`);
+        navigate('/plan/' + newPlan.id);
+      });
+    },
+  });
+}
+
 // ============================================================
 //  Ansicht: Plan-Detail (Trainingstage)
 // ============================================================
 route('/plan/:id', ({ id }) => {
   const p = DB.getPlan(id);
   if (!p) return navigate('/plans');
-  setChrome({ title: `${p.emoji} ${p.name}`, back: true, actions: [actionBtn('✏️', () => editPlanModal(id, p.locationId))] });
+  setChrome({ title: `${p.emoji} ${p.name}`, back: true, actions: [
+    actionBtn('📤', () => copyPlanToLocationModal(id), ''),
+    actionBtn('✏️', () => editPlanModal(id, p.locationId)),
+  ] });
   const loc = DB.getLocation(p.locationId);
   const days = DB.daysByPlan(id);
   let html = `${loc ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(loc.emoji)} ${esc(loc.name)}</div>` : ''}
@@ -582,7 +613,7 @@ function pickExerciseModal(onPick) {
         const items = list.filter(e => e.name.toLowerCase().includes(q.toLowerCase()));
         listEl.innerHTML = items.length ? items.map(e =>
           `<div class="list-row" data-pick="${e.id}"><div class="grow"><div class="r-title">${esc(e.name)}</div>
-            ${e.category ? `<div class="r-sub">${esc(e.category)}</div>` : ''}</div><span class="arrow">＋</span></div>`
+            ${exSubtitle(e) ? `<div class="r-sub">${esc(exSubtitle(e))}</div>` : ''}</div><span class="arrow">＋</span></div>`
         ).join('') : `<div class="tiny muted center" style="padding:12px">Keine Übung gefunden.</div>`;
         $$('[data-pick]', listEl).forEach(n => n.onclick = () => { close(); onPick(n.dataset.pick); });
       };
@@ -593,34 +624,67 @@ function pickExerciseModal(onPick) {
   });
 }
 
+function exSubtitle(e) {
+  return [e.equipment, (e.muscles || []).join(', ')].filter(Boolean).join(' · ');
+}
+
+let libFilter = { muscles: new Set(), equipment: new Set() };
+
 route('/library', () => {
   setChrome({ title: 'Übungsbibliothek', back: false });
   const list = DB.exercises();
-  let html = `<input id="libSearch" placeholder="Suchen …" style="margin-bottom:12px" />`;
   if (!list.length) {
-    html += `<div class="empty"><div class="big">📚</div><div>Deine Bibliothek ist leer.</div>
-      <div class="tiny" style="margin:8px 0 0">Lege deine Übungen selbst an – sie sind in allen Plänen nutzbar.</div></div>`;
-  } else {
-    html += `<div id="libList"></div>`;
+    appEl.innerHTML = `<div class="empty"><div class="big">📚</div><div>Deine Bibliothek ist leer.</div>
+      <div class="tiny" style="margin:8px 0 0">Lege deine Übungen selbst an – sie sind ortübergreifend in allen Plänen nutzbar.</div></div>`;
+    appEl.append(el('button', { class: 'fab', onclick: () => editExerciseModal(null) }, '+'));
+    return;
   }
+
+  let html = `<input id="libSearch" placeholder="Suchen …" style="margin-bottom:10px" />
+    <div class="filter-bar">
+      <div class="filter-row" id="filterMuscles">${DB.MUSCLE_GROUPS.map(m => `<button class="filter-chip ${libFilter.muscles.has(m) ? 'sel' : ''}" data-fm="${esc(m)}">${esc(m)}</button>`).join('')}</div>
+      <div class="filter-row" id="filterEquip">${DB.EQUIPMENT_TYPES.map(eq => `<button class="filter-chip ${libFilter.equipment.has(eq) ? 'sel' : ''}" data-fe="${esc(eq)}">${esc(eq)}</button>`).join('')}</div>
+    </div>
+    <div id="libCount" class="tiny muted" style="margin:8px 0"></div>
+    <div id="libList"></div>`;
   appEl.innerHTML = html;
-  const draw = (q = '') => {
+
+  $$('[data-fm]', appEl).forEach(b => b.onclick = () => {
+    const m = b.dataset.fm;
+    libFilter.muscles.has(m) ? libFilter.muscles.delete(m) : libFilter.muscles.add(m);
+    b.classList.toggle('sel');
+    draw($('#libSearch', appEl).value);
+  });
+  $$('[data-fe]', appEl).forEach(b => b.onclick = () => {
+    const eq = b.dataset.fe;
+    libFilter.equipment.has(eq) ? libFilter.equipment.delete(eq) : libFilter.equipment.add(eq);
+    b.classList.toggle('sel');
+    draw($('#libSearch', appEl).value);
+  });
+
+  function draw(q = '') {
     const listEl = $('#libList', appEl);
     if (!listEl) return;
-    const items = list.filter(e => e.name.toLowerCase().includes(q.toLowerCase()));
-    listEl.innerHTML = items.map(e => {
+    const items = list.filter(e => {
+      if (q && !e.name.toLowerCase().includes(q.toLowerCase())) return false;
+      if (libFilter.muscles.size && !(e.muscles || []).some(m => libFilter.muscles.has(m))) return false;
+      if (libFilter.equipment.size && !libFilter.equipment.has(e.equipment)) return false;
+      return true;
+    });
+    $('#libCount', appEl).textContent = `${items.length} von ${list.length} Übungen`;
+    listEl.innerHTML = items.length ? items.map(e => {
       const uses = DB.exerciseUsage(e.id);
       return `<div class="list-row" data-ex="${e.id}">
         <div class="grow"><div class="r-title">${esc(e.name)}</div>
-          <div class="r-sub">${[e.category, e.muscles?.join(', ')].filter(Boolean).join(' · ') || 'keine Kategorie'} ${uses ? '· ' + uses + '× trainiert' : ''}</div></div>
+          <div class="r-sub">${exSubtitle(e) || 'ohne Angaben'}${uses ? ' · ' + uses + '× trainiert' : ''}</div></div>
         <button class="btn ghost sm" data-edit="${e.id}">✏️</button>
         <span class="arrow" data-stats="${e.id}">📈</span></div>`;
-    }).join('');
+    }).join('') : `<div class="empty"><div>Keine Übung passt zum Filter.</div></div>`;
     $$('[data-ex]', listEl).forEach(n => n.onclick = (ev) => {
       if (ev.target.closest('[data-edit]')) return editExerciseModal(n.dataset.ex);
       navigate('/stats/' + n.dataset.ex);
     });
-  };
+  }
   draw();
   const search = $('#libSearch', appEl);
   if (search) search.oninput = e => draw(e.target.value);
@@ -628,27 +692,39 @@ route('/library', () => {
 });
 
 function editExerciseModal(id, onSaved) {
-  const ex = id ? DB.getExercise(id) : { name: '', category: '', muscles: [], notes: '', unit: 'kg' };
+  const ex = id ? DB.getExercise(id) : { name: '', muscles: [], equipment: '', notes: '', unit: 'kg' };
   const usage = id ? DB.exerciseUsage(id) : 0;
+  const muscles = new Set(ex.muscles || []);
+  let equipment = ex.equipment || '';
   openModal({
     title: id ? 'Übung bearbeiten' : 'Neue Übung',
     body: `
       <label class="field"><span>Name</span><input id="f-name" value="${esc(ex.name)}" placeholder="z.B. Bankdrücken" /></label>
-      <label class="field"><span>Kategorie (optional)</span><input id="f-cat" value="${esc(ex.category)}" placeholder="z.B. Brust, Langhantel" /></label>
-      <label class="field"><span>Muskelgruppen (Komma-getrennt, optional)</span><input id="f-mus" value="${esc((ex.muscles || []).join(', '))}" placeholder="Brust, Trizeps" /></label>
+      <label class="field"><span>Muskelgruppen</span></label>
+      <div class="filter-row" id="f-muscles" style="margin:-4px 0 12px">${DB.MUSCLE_GROUPS.map(m => `<button type="button" class="filter-chip ${muscles.has(m) ? 'sel' : ''}" data-m="${esc(m)}">${esc(m)}</button>`).join('')}</div>
+      <label class="field"><span>Gerät</span></label>
+      <div class="filter-row" id="f-equip" style="margin:-4px 0 12px">${DB.EQUIPMENT_TYPES.map(eq => `<button type="button" class="filter-chip ${equipment === eq ? 'sel' : ''}" data-e="${esc(eq)}">${esc(eq)}</button>`).join('')}</div>
       <label class="field"><span>Einheit</span>
         <select id="f-unit"><option value="kg"${ex.unit === 'kg' ? ' selected' : ''}>kg</option><option value="lb"${ex.unit === 'lb' ? ' selected' : ''}>lb</option></select></label>
       <label class="field"><span>Notiz (optional)</span><textarea id="f-notes" placeholder="Technik-Hinweise, Einstellung am Gerät …">${esc(ex.notes)}</textarea></label>`,
     footer: `${id ? '<button class="btn danger" data-del>Löschen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
     onMount: (m, close) => {
+      $$('[data-m]', m).forEach(b => b.onclick = () => {
+        muscles.has(b.dataset.m) ? muscles.delete(b.dataset.m) : muscles.add(b.dataset.m);
+        b.classList.toggle('sel');
+      });
+      $$('[data-e]', m).forEach(b => b.onclick = () => {
+        equipment = equipment === b.dataset.e ? '' : b.dataset.e;
+        $$('[data-e]', m).forEach(x => x.classList.toggle('sel', x.dataset.e === equipment));
+      });
       $('[data-x]', m).onclick = close;
       $('[data-ok]', m).onclick = () => {
         const name = $('#f-name', m).value.trim();
         if (!name) return toast('Bitte einen Namen eingeben');
         const data = {
           name,
-          category: $('#f-cat', m).value.trim(),
-          muscles: $('#f-mus', m).value.split(',').map(s => s.trim()).filter(Boolean),
+          muscles: [...muscles],
+          equipment,
           unit: $('#f-unit', m).value,
           notes: $('#f-notes', m).value.trim(),
         };
@@ -737,6 +813,8 @@ function renderTrain(container, id) {
 
   const finishBtn = $('#finishBtn', container);
   if (finishBtn) finishBtn.onclick = async () => {
+    const diffs = DB.computeSessionPlanDiff(id);
+    if (diffs.length) await planDiffModal(id, diffs);
     DB.updateSession(id, { finishedAt: Date.now() });
     stopRest();
     toast('Training gespeichert 💪');
@@ -744,6 +822,38 @@ function renderTrain(container, id) {
   };
   const reopenBtn = $('#reopenBtn', container);
   if (reopenBtn) reopenBtn.onclick = () => { DB.updateSession(id, { finishedAt: null }); renderTrain(container, id); };
+}
+
+// Nach dem Training: Änderungen (Pause/Sätze pro Übung, hinzugefügte/entfernte
+// Übungen) einzeln auswählbar in den Trainingsplan übernehmen lassen.
+function planDiffModal(sessionId, diffs) {
+  return new Promise(resolve => {
+    const s = DB.getSession(sessionId);
+    const day = s ? DB.getDay(s.dayId) : null;
+    const rows = diffs.map((d, i) => {
+      let label = '';
+      if (d.type === 'restChanged') label = `⏱ Pause bei <b>${esc(d.name)}</b>: ${d.oldVal}s → ${d.newVal}s`;
+      else if (d.type === 'setsChanged') label = `🔢 Sätze bei <b>${esc(d.name)}</b>: ${d.oldVal} → ${d.newVal}`;
+      else if (d.type === 'exerciseAdded') label = `➕ <b>${esc(d.name)}</b> zum Plan hinzufügen`;
+      else if (d.type === 'exerciseRemoved') label = `➖ <b>${esc(d.name)}</b> aus dem Plan entfernen`;
+      return `<label class="diff-row"><input type="checkbox" data-diff="${i}" checked /><span>${label}</span></label>`;
+    }).join('');
+    const close = openModal({
+      title: 'Anpassungen übernehmen?',
+      body: `<p class="tiny muted" style="margin-top:0">Du hast während des Trainings Änderungen vorgenommen. Sollen diese auch für „${esc(day?.name || 'diesen Trainingstag')}" gelten?</p>
+        <div class="diff-list">${rows}</div>`,
+      footer: `<button class="btn ghost" data-skip>Nur diesmal</button><button class="btn primary" data-apply>Übernehmen</button>`,
+      onMount: (m, c) => {
+        $('[data-skip]', m).onclick = () => { c(); resolve(); };
+        $('[data-apply]', m).onclick = () => {
+          const selected = [];
+          $$('[data-diff]', m).forEach(cb => { if (cb.checked) selected.push(diffs[parseInt(cb.dataset.diff)]); });
+          if (selected.length) DB.applyPlanDiffs(sessionId, selected);
+          c(); resolve();
+        };
+      },
+    });
+  });
 }
 
 function renderEntries(container, id) {
@@ -1179,12 +1289,6 @@ route('/settings', () => {
       <input type="file" id="impFile" accept="application/json,.json" hidden />
     </div>
 
-    <div class="section-title">Beispieldaten</div>
-    <div class="card">
-      <p class="tiny muted" style="margin-top:0">Zum Ausprobieren einen Beispiel-Ort mit Plan, Übungen und Verlauf anlegen.</p>
-      <button class="btn" id="seedBtn">Beispieldaten laden</button>
-    </div>
-
     <div class="section-title">Gefahrenzone</div>
     <div class="card">
       <button class="btn danger block" id="wipeBtn">Alle Daten löschen</button>
@@ -1212,9 +1316,6 @@ route('/settings', () => {
     catch (e) { toast('Import fehlgeschlagen: ' + e.message); }
     impFile.value = '';
   };
-  $('#seedBtn', appEl).onclick = async () => {
-    if (await confirmDialog('Beispieldaten hinzufügen?')) { seedDemo(); toast('Beispieldaten geladen'); navigate('/plans'); }
-  };
   $('#wipeBtn', appEl).onclick = async () => {
     if (await confirmDialog('Wirklich ALLE Daten unwiderruflich löschen?', { danger: true, okText: 'Alles löschen' })) {
       DB.wipeAll(); toast('Alle Daten gelöscht'); navigate('/');
@@ -1222,50 +1323,128 @@ route('/settings', () => {
   };
 });
 
-// ---------- Beispieldaten ----------
-function seedDemo() {
-  const bank = DB.addExercise({ name: 'Bankdrücken', category: 'Brust', muscles: ['Brust', 'Trizeps'] });
-  const squat = DB.addExercise({ name: 'Kniebeuge', category: 'Beine', muscles: ['Quadrizeps', 'Gesäß'] });
-  const row = DB.addExercise({ name: 'Rudern', category: 'Rücken', muscles: ['Latissimus', 'Bizeps'] });
-  const ohp = DB.addExercise({ name: 'Schulterdrücken', category: 'Schulter', muscles: ['Schulter'] });
+// ---------- Startinhalt: Übungsbibliothek + Sports Club Kiel (Push/Pull/Legs) ----------
+// Läuft einmalig (siehe SEED_VERSION-Migration unten) – reine Struktur, keine
+// erfundene Trainingshistorie, damit sofort echt trainiert werden kann.
+const LIBRARY_EXERCISES = [
+  // Brust
+  { name: 'Bankdrücken (Langhantel)', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Langhantel' },
+  { name: 'Schrägbankdrücken (Kurzhantel)', muscles: ['Brust', 'Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
+  { name: 'Kurzhantel-Bankdrücken (flach)', muscles: ['Brust', 'Trizeps'], equipment: 'Kurzhantel' },
+  { name: 'Butterfly (Maschine)', muscles: ['Brust'], equipment: 'Maschine' },
+  { name: 'Kabelzug über Kreuz', muscles: ['Brust'], equipment: 'Kabelzug' },
+  { name: 'Dips (Brust-Fokus)', muscles: ['Brust', 'Trizeps'], equipment: 'Körpergewicht' },
+  { name: 'Liegestütze', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Körpergewicht' },
+  // Rücken
+  { name: 'Kreuzheben (Langhantel)', muscles: ['Rücken', 'Gesäß', 'Beinbeuger', 'Ganzkörper'], equipment: 'Langhantel' },
+  { name: 'Rumänisches Kreuzheben', muscles: ['Beinbeuger', 'Gesäß', 'Rücken'], equipment: 'Langhantel' },
+  { name: 'Klimmzüge', muscles: ['Rücken', 'Bizeps'], equipment: 'Körpergewicht' },
+  { name: 'Latzug (breiter Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { name: 'Latzug (enger Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { name: 'Rudern vorgebeugt (Langhantel)', muscles: ['Rücken', 'Bizeps'], equipment: 'Langhantel' },
+  { name: 'Kabelrudern sitzend', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { name: 'T-Bar Rudern', muscles: ['Rücken'], equipment: 'Maschine' },
+  { name: 'Rückenstrecker (Hyperextension)', muscles: ['Rücken', 'Gesäß'], equipment: 'Körpergewicht' },
+  { name: 'Facepulls', muscles: ['Schultern', 'Rücken'], equipment: 'Kabelzug' },
+  // Schultern
+  { name: 'Schulterdrücken (Langhantel)', muscles: ['Schultern', 'Trizeps'], equipment: 'Langhantel' },
+  { name: 'Schulterdrücken (Kurzhantel)', muscles: ['Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
+  { name: 'Schulterdrücken (Maschine)', muscles: ['Schultern'], equipment: 'Maschine' },
+  { name: 'Seitheben (Kurzhantel)', muscles: ['Schultern'], equipment: 'Kurzhantel' },
+  { name: 'Frontheben', muscles: ['Schultern'], equipment: 'Kurzhantel' },
+  { name: 'Reverse Butterfly (hintere Schulter)', muscles: ['Schultern', 'Rücken'], equipment: 'Maschine' },
+  { name: 'Aufrechtes Rudern', muscles: ['Schultern', 'Rücken'], equipment: 'Langhantel' },
+  // Arme
+  { name: 'Bizepscurls (Langhantel)', muscles: ['Bizeps'], equipment: 'Langhantel' },
+  { name: 'Bizepscurls (Kurzhantel)', muscles: ['Bizeps'], equipment: 'Kurzhantel' },
+  { name: 'Hammercurls', muscles: ['Bizeps', 'Unterarme'], equipment: 'Kurzhantel' },
+  { name: 'Konzentrationscurls', muscles: ['Bizeps'], equipment: 'Kurzhantel' },
+  { name: 'Trizepsdrücken am Kabel (Pushdown)', muscles: ['Trizeps'], equipment: 'Kabelzug' },
+  { name: 'Trizeps-Überkopfstrecken', muscles: ['Trizeps'], equipment: 'Kurzhantel' },
+  { name: 'Enges Bankdrücken', muscles: ['Trizeps', 'Brust'], equipment: 'Langhantel' },
+  { name: 'Dips (Trizeps-Fokus)', muscles: ['Trizeps'], equipment: 'Körpergewicht' },
+  { name: 'Unterarmcurls (Wrist Curls)', muscles: ['Unterarme'], equipment: 'Kurzhantel' },
+  // Beine
+  { name: 'Kniebeuge (Langhantel)', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Langhantel' },
+  { name: 'Beinpresse', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Maschine' },
+  { name: 'Ausfallschritte (Kurzhantel)', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
+  { name: 'Beinstrecker (Maschine)', muscles: ['Quadrizeps'], equipment: 'Maschine' },
+  { name: 'Beinbeuger liegend (Maschine)', muscles: ['Beinbeuger'], equipment: 'Maschine' },
+  { name: 'Beinbeuger sitzend (Maschine)', muscles: ['Beinbeuger'], equipment: 'Maschine' },
+  { name: 'Hüftstoßen (Hip Thrust)', muscles: ['Gesäß'], equipment: 'Langhantel' },
+  { name: 'Wadenheben stehend', muscles: ['Waden'], equipment: 'Maschine' },
+  { name: 'Wadenheben sitzend', muscles: ['Waden'], equipment: 'Maschine' },
+  { name: 'Goblet Squat', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
+  // Bauch
+  { name: 'Crunches', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { name: 'Plank (Unterarmstütz)', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { name: 'Beinheben hängend', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { name: 'Kabel-Crunches', muscles: ['Bauch'], equipment: 'Kabelzug' },
+  { name: 'Russian Twist', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+];
 
-  const loc = DB.addLocation({ name: 'Fitnessstudio', emoji: '🏋️', color: COLORS[0] });
-  const plan = DB.addPlan({ locationId: loc.id, name: 'Oberkörper / Unterkörper', emoji: '🔄', color: COLORS[0] });
-  const upper = DB.addDay({ planId: plan.id, name: 'Oberkörper', emoji: 'OK', color: COLORS[3] });
-  const lower = DB.addDay({ planId: plan.id, name: 'Unterkörper', emoji: '🦵', color: COLORS[1] });
-  DB.addExerciseToDay(upper.id, bank.id, { sets: 3, reps: 8, restSec: 120 });
-  DB.addExerciseToDay(upper.id, row.id, { sets: 3, reps: 10, restSec: 90 });
-  DB.addExerciseToDay(upper.id, ohp.id, { sets: 3, reps: 10, restSec: 90 });
-  DB.addExerciseToDay(lower.id, squat.id, { sets: 4, reps: 6, restSec: 150 });
+// Push/Pull/Legs-Zielwerte (Sätze/Wdh./Pause), an Hypertrophie-/Kraft-Richtwerten
+// orientiert: Grundübungen 4-6 Wdh. mit langer Pause, Isolation 10-15 Wdh. kürzer.
+const PPL_PLAN = {
+  Push: { emoji: '🔴', color: '#ff6b6b', exercises: [
+    ['Bankdrücken (Langhantel)', 4, 7, 150],
+    ['Schrägbankdrücken (Kurzhantel)', 3, 9, 120],
+    ['Schulterdrücken (Langhantel)', 3, 9, 120],
+    ['Seitheben (Kurzhantel)', 3, 14, 60],
+    ['Dips (Brust-Fokus)', 3, 10, 90],
+    ['Trizepsdrücken am Kabel (Pushdown)', 3, 11, 60],
+  ] },
+  Pull: { emoji: '🔵', color: '#4cc9f0', exercises: [
+    ['Kreuzheben (Langhantel)', 3, 5, 180],
+    ['Klimmzüge', 3, 8, 120],
+    ['Rudern vorgebeugt (Langhantel)', 3, 9, 120],
+    ['Kabelrudern sitzend', 3, 11, 90],
+    ['Facepulls', 3, 17, 60],
+    ['Bizepscurls (Langhantel)', 3, 11, 60],
+  ] },
+  Legs: { emoji: '🟢', color: '#46c98b', exercises: [
+    ['Kniebeuge (Langhantel)', 4, 7, 180],
+    ['Beinpresse', 3, 11, 120],
+    ['Rumänisches Kreuzheben', 3, 9, 120],
+    ['Ausfallschritte (Kurzhantel)', 3, 11, 90],
+    ['Beinbeuger liegend (Maschine)', 3, 11, 90],
+    ['Wadenheben stehend', 4, 14, 60],
+  ] },
+};
 
-  // Ein paar vergangene Einheiten für Statistik
-  const d = DB.db();
-  const mk = (dayId, daysAgo, entriesData) => {
-    const base = new Date(); base.setDate(base.getDate() - daysAgo);
-    const iso = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
-    const day = DB.getDay(dayId);
-    const s = {
-      id: DB.uid('ses'), locationId: loc.id, planId: plan.id, dayId, dayName: day.name,
-      date: iso, startedAt: base.getTime(), finishedAt: base.getTime() + 3600000,
-      emoji: day.emoji, color: day.color, note: '',
-      entries: entriesData,
-    };
-    d.sessions.push(s);
-  };
-  const setsOf = (exId, name, arr) => ({ exerciseId: exId, name, unit: 'kg', targetReps: arr[0][1], targetSets: arr.length, restSec: 120, sets: arr.map(([w, r]) => ({ weight: w, reps: r, done: true })) });
-  mk(upper.id, 21, [setsOf(bank.id, 'Bankdrücken', [[60, 8], [60, 8], [55, 9]]), setsOf(row.id, 'Rudern', [[50, 10], [50, 10], [50, 9]])]);
-  mk(upper.id, 14, [setsOf(bank.id, 'Bankdrücken', [[62.5, 8], [62.5, 7], [60, 8]]), setsOf(row.id, 'Rudern', [[52.5, 10], [52.5, 10], [50, 10]])]);
-  mk(upper.id, 7, [setsOf(bank.id, 'Bankdrücken', [[65, 8], [65, 7], [62.5, 8]]), setsOf(row.id, 'Rudern', [[55, 10], [55, 9], [52.5, 10]])]);
-  mk(lower.id, 18, [setsOf(squat.id, 'Kniebeuge', [[80, 6], [80, 6], [80, 5], [75, 6]])]);
-  mk(lower.id, 11, [setsOf(squat.id, 'Kniebeuge', [[85, 6], [85, 5], [82.5, 6], [80, 6]])]);
-  mk(lower.id, 4, [setsOf(squat.id, 'Kniebeuge', [[87.5, 6], [87.5, 6], [85, 6], [82.5, 6]])]);
-  DB.save();
+function seedInitialContent() {
+  const byName = new Map();
+  LIBRARY_EXERCISES.forEach(e => { byName.set(e.name, DB.addExercise(e)); });
+
+  const loc = DB.addLocation({ name: 'Sports Club Kiel', emoji: '🏋️', color: COLORS[0] });
+  const plan = DB.addPlan({ locationId: loc.id, name: 'Push Pull Legs', emoji: '🔄', color: COLORS[0] });
+
+  Object.entries(PPL_PLAN).forEach(([dayName, cfg]) => {
+    const day = DB.addDay({ planId: plan.id, name: dayName, emoji: cfg.emoji, color: cfg.color });
+    cfg.exercises.forEach(([exName, sets, reps, restSec]) => {
+      const ex = byName.get(exName);
+      if (ex) DB.addExerciseToDay(day.id, ex.id, { sets, reps, restSec });
+    });
+  });
+  DB.setActiveLocation(loc.id);
+}
+
+// Einmalige Migration: alte (Test-/Demo-)Daten löschen und den kuratierten
+// Startinhalt anlegen. Läuft nur, solange settings.seedVersion < SEED_VERSION -
+// ein manuelles "Alle Daten löschen" markiert die Version als aktuell, damit
+// danach wirklich leer bleibt, was leer sein soll.
+function ensureSeed() {
+  if (DB.db().settings.seedVersion < DB.SEED_VERSION) {
+    DB.wipeAll();
+    seedInitialContent();
+  }
 }
 
 // ============================================================
 //  Start
 // ============================================================
 DB.db();
+ensureSeed();
 render();
 
 // Service Worker (Offline / installierbar)

@@ -6,14 +6,25 @@
 
 const KEY = 'trainingsplan.v1';
 
+// Einmalige Content-Migration: wenn settings.seedVersion < SEED_VERSION, wird der
+// Store beim Start geleert und mit dem kuratierten Startinhalt (Sports Club Kiel +
+// Push/Pull/Legs + Übungsbibliothek) neu befüllt. wipeAll() setzt seedVersion
+// direkt auf SEED_VERSION, damit ein manuelles "Alle Daten löschen" NICHT erneut
+// automatisch befüllt wird (nur diese eine automatische Migration tut das).
+export const SEED_VERSION = 2;
+
+// Feste Vokabulare für Muskelgruppen & Geräte-Art (für Übungsbibliothek-Filter)
+export const MUSCLE_GROUPS = ['Brust', 'Rücken', 'Schultern', 'Bizeps', 'Trizeps', 'Unterarme', 'Quadrizeps', 'Beinbeuger', 'Gesäß', 'Waden', 'Bauch', 'Ganzkörper'];
+export const EQUIPMENT_TYPES = ['Langhantel', 'Kurzhantel', 'Maschine', 'Kabelzug', 'Körpergewicht', 'Sonstiges'];
+
 const DEFAULTS = () => ({
   version: 1,
-  settings: { defaultRestSec: 90, soundOnRestEnd: true },
-  exercises: [],   // Bibliothek: {id,name,category,muscles[],notes,unit,createdAt}
+  settings: { defaultRestSec: 90, soundOnRestEnd: true, seedVersion: 0 },
+  exercises: [],   // Bibliothek: {id,name,muscles[],equipment,notes,unit,createdAt}
   locations: [],   // Orte:        {id,name,emoji,color,createdAt}
   plans: [],       // Pläne:       {id,locationId,name,emoji,color,createdAt}
   days: [],        // Trainingstage:{id,planId,name,emoji,color,order,exercises:[{id,exerciseId,sets,reps,restSec}],createdAt}
-  sessions: [],    // Einheiten:   {id,locationId,planId,dayId,dayName,date,startedAt,finishedAt,emoji,color,note,entries:[...]}
+  sessions: [],    // Einheiten:   {id,locationId,planId,dayId,dayName,date,startedAt,finishedAt,emoji,color,note,entries:[...],planSnapshot:[...]}
 });
 
 let store = null;
@@ -52,7 +63,7 @@ export function uid(p = 'id') {
 export function exercises() { return db().exercises.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')); }
 export function getExercise(id) { return db().exercises.find(e => e.id === id) || null; }
 export function addExercise(data) {
-  const ex = { id: uid('ex'), name: '', category: '', muscles: [], notes: '', unit: 'kg', createdAt: Date.now(), ...data };
+  const ex = { id: uid('ex'), name: '', muscles: [], equipment: '', notes: '', unit: 'kg', createdAt: Date.now(), ...data };
   db().exercises.push(ex); save(); return ex;
 }
 export function updateExercise(id, patch) {
@@ -115,6 +126,21 @@ export function deletePlan(id) {
   d.days = d.days.filter(day => day.planId !== id);
   d.plans = d.plans.filter(p => p.id !== id);
   save();
+}
+
+// Kopiert einen Plan (mit allen Trainingstagen & Zielwerten) als unabhängige
+// Kopie an einen anderen Ort. Übungen werden dabei NICHT dupliziert -
+// die Bibliothek ist ortübergreifend gemeinsam (jedes Gym hat z.B. eine
+// Brustpresse), nur die Statistik/das "letztes Mal" bleibt je Ort getrennt.
+// Die Kopie ist danach vollständig unabhängig vom Original editierbar.
+export function copyPlanToLocation(planId, targetLocationId) {
+  const p = getPlan(planId); if (!p) return null;
+  const newPlan = addPlan({ name: p.name, emoji: p.emoji, color: p.color, locationId: targetLocationId });
+  daysByPlan(planId).forEach(day => {
+    const newDay = addDay({ name: day.name, emoji: day.emoji, color: day.color, planId: newPlan.id });
+    day.exercises.forEach(item => addExerciseToDay(newDay.id, item.exerciseId, { sets: item.sets, reps: item.reps, restSec: item.restSec }));
+  });
+  return newPlan;
 }
 
 // ---------- Trainingstage ----------
@@ -194,11 +220,83 @@ export function startSession(dayId) {
     color: day.color || plan?.color || '#46c98b',
     note: '',
     entries,
+    // Schnappschuss des Plans zum Trainingsstart -> Basis für den Diff beim Beenden
+    // (Trainingstag könnte sich zwischenzeitlich ändern oder gelöscht werden).
+    planSnapshot: day.exercises.map(item => ({ exerciseId: item.exerciseId, sets: item.sets, reps: item.reps, restSec: item.restSec })),
   };
   db().sessions.push(s); save(); return s;
 }
 export function updateSession(id, patch) { const s = getSession(id); if (s) { Object.assign(s, patch); save(); } return s; }
 export function deleteSession(id) { const d = db(); d.sessions = d.sessions.filter(s => s.id !== id); save(); }
+
+// ---------- Anpassungen während des Trainings zurück in den Plan übernehmen ----------
+// Vergleicht den aktuellen Stand der Einheit mit dem Schnappschuss bei Trainingsstart
+// und liefert einzeln auswählbare Änderungen (Pause/Sätze pro Übung, hinzugefügte/
+// entfernte Übungen). Ohne planSnapshot oder gelöschten Trainingstag: keine Diffs.
+export function computeSessionPlanDiff(sessionId) {
+  const s = getSession(sessionId);
+  if (!s || !s.planSnapshot) return [];
+  const day = getDay(s.dayId);
+  if (!day) return [];
+  const snapMap = new Map(s.planSnapshot.map(x => [x.exerciseId, x]));
+  const entryMap = new Map(s.entries.map(x => [x.exerciseId, x]));
+  const diffs = [];
+  for (const entry of s.entries) {
+    const snap = snapMap.get(entry.exerciseId);
+    const doneCount = (entry.sets || []).filter(isWorkingDone).length;
+    if (!snap) {
+      if (doneCount > 0) {
+        diffs.push({
+          type: 'exerciseAdded', exerciseId: entry.exerciseId, name: entry.name,
+          sets: Math.max(doneCount, 1), reps: entry.targetReps || num(entry.sets[0]?.reps) || 10, restSec: entry.restSec,
+        });
+      }
+      continue;
+    }
+    if (entry.restSec !== snap.restSec) {
+      diffs.push({ type: 'restChanged', exerciseId: entry.exerciseId, name: entry.name, oldVal: snap.restSec, newVal: entry.restSec });
+    }
+    if (doneCount > 0 && doneCount !== snap.sets) {
+      diffs.push({ type: 'setsChanged', exerciseId: entry.exerciseId, name: entry.name, oldVal: snap.sets, newVal: doneCount });
+    }
+  }
+  for (const snap of s.planSnapshot) {
+    if (!entryMap.has(snap.exerciseId)) {
+      const ex = getExercise(snap.exerciseId);
+      diffs.push({ type: 'exerciseRemoved', exerciseId: snap.exerciseId, name: ex ? ex.name : '(Übung)' });
+    }
+  }
+  return diffs;
+}
+
+// Wendet ausgewählte Diffs (aus computeSessionPlanDiff) auf den zugehörigen
+// Trainingstag an (Plan-Vorlage). Nicht ausgewählte Änderungen gelten nur für
+// diese eine Einheit.
+export function applyPlanDiffs(sessionId, changes) {
+  const s = getSession(sessionId); if (!s) return { applied: 0 };
+  const day = getDay(s.dayId); if (!day) return { applied: 0 };
+  let applied = 0;
+  changes.forEach(ch => {
+    if (ch.type === 'restChanged' || ch.type === 'setsChanged') {
+      const item = day.exercises.find(x => x.exerciseId === ch.exerciseId);
+      if (!item) return;
+      if (ch.type === 'restChanged') item.restSec = ch.newVal;
+      if (ch.type === 'setsChanged') item.sets = ch.newVal;
+      applied++;
+    } else if (ch.type === 'exerciseAdded') {
+      if (!day.exercises.some(x => x.exerciseId === ch.exerciseId)) {
+        day.exercises.push({ id: uid('de'), exerciseId: ch.exerciseId, sets: ch.sets, reps: ch.reps, restSec: ch.restSec });
+        applied++;
+      }
+    } else if (ch.type === 'exerciseRemoved') {
+      const before = day.exercises.length;
+      day.exercises = day.exercises.filter(x => x.exerciseId !== ch.exerciseId);
+      if (day.exercises.length !== before) applied++;
+    }
+  });
+  save();
+  return { applied };
+}
 
 // Letzte abgeschlossene Sätze einer Übung VOR einer bestimmten Einheit (für "letztes Mal").
 // Optional auf einen Ort beschränkt (Geräte sind zwischen Gyms nicht vergleichbar).
@@ -324,7 +422,9 @@ export function importData(json, mode = 'replace') {
   }
   save();
 }
-export function wipeAll() { store = DEFAULTS(); save(); }
+// Setzt alles komplett zurück. seedVersion wird auf den aktuellen Stand gesetzt,
+// damit ein manuelles Löschen wirklich leer bleibt (kein automatisches Reseeden).
+export function wipeAll() { store = DEFAULTS(); store.settings.seedVersion = SEED_VERSION; save(); }
 
 // ---------- Datum ----------
 export function todayISO() {
