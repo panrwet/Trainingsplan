@@ -1,5 +1,5 @@
 // Service Worker – Offline-Fähigkeit für die Trainings-PWA
-const CACHE = 'trainingsplan-v2';
+const CACHE = 'trainingsplan-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -44,12 +44,13 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Assets: cache-first, dann Netzwerk (und cachen)
+  // Assets: network-first (frisch, wenn online -> Updates kommen automatisch an),
+  // Fallback auf Cache (offline).
   e.respondWith(
-    caches.match(req).then(cached => cached || fetch(req).then(res => {
+    fetch(req).then(res => {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(req, copy));
       return res;
-    }).catch(() => cached))
+    }).catch(() => caches.match(req))
   );
 });
