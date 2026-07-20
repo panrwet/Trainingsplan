@@ -1560,8 +1560,9 @@ function tagBadgesHTML(ex) {
   const colored = DB.db().settings.tagColors;
   const mCls = colored ? 'tag-badge muscle' : 'tag-badge neutral';
   const eCls = colored ? 'tag-badge equip' : 'tag-badge neutral';
-  const parts = (ex.muscles || []).map(m => `<span class="${mCls}">${esc(m)}</span>`);
+  const parts = [];
   if (ex.equipment) parts.push(`<span class="${eCls}">${esc(ex.equipment)}</span>`);
+  (ex.muscles || []).forEach(m => parts.push(`<span class="${mCls}">${esc(m)}</span>`));
   return parts.length ? `<div class="tag-badges">${parts.join('')}</div>` : '';
 }
 
