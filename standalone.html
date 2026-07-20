@@ -330,6 +330,7 @@ a { color: var(--accent); }
 .loc-chip:active { transform: translateY(1px); }
 .loc-chip.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
 .loc-chip.add { color: var(--text-dim2); font-size: 1.1rem; padding: 7px 13px; }
+.loc-chip-edit { font-size: .78rem; opacity: .85; }
 .loc-badge {
   display: inline-flex; align-items: center; gap: 3px; font-size: .76rem; font-weight: 700;
   background: var(--bg-elev2); border: 1px solid var(--border); border-radius: 6px;
@@ -361,6 +362,27 @@ a { color: var(--accent); }
 }
 .filter-chip:active { transform: translateY(1px); }
 .filter-chip.sel { background: var(--accent-2); border-color: var(--accent); color: #fff; }
+
+/* ---------- Pläne: aufklappbare Trainingstage ---------- */
+.plan-acc {
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+  margin-bottom: 8px; overflow: hidden;
+}
+.plan-acc summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+}
+.plan-acc summary::-webkit-details-marker { display: none; }
+.plan-acc summary .chip {
+  flex: 0 0 auto; width: 38px; height: 38px; border-radius: 11px;
+  display: grid; place-items: center; font-size: 1.2rem; font-weight: 700;
+}
+.plan-acc summary .r-title { font-weight: 650; font-size: .95rem; }
+.plan-acc summary .r-sub { color: var(--text-dim); font-size: .8rem; margin-top: 1px; }
+.plan-acc .acc-chevron { color: var(--text-dim2); font-size: 1.1rem; transition: transform .15s; }
+.plan-acc[open] .acc-chevron { transform: rotate(180deg); }
+.plan-acc-body { padding: 0 10px 10px; }
+.plan-acc-body .list-row:last-child { margin-bottom: 0; }
 
 /* ---------- Trainings-Anpassungen nach dem Training (Diff-Modal) ---------- */
 .diff-list { display: flex; flex-direction: column; gap: 2px; }
@@ -1064,13 +1086,19 @@ function locationBarHTML() {
   const active = DB.getActiveLocationId();
   if (!locs.length) return '';
   return `<div class="loc-bar">
-    ${locs.map(l => `<button class="loc-chip ${l.id === active ? 'sel' : ''}" data-loc-sel="${l.id}">
-        <span>${esc(l.emoji)}</span><span>${esc(l.name)}</span></button>`).join('')}
+    ${locs.map(l => `<button class="loc-chip ${l.id === active ? 'sel' : ''}" data-loc-sel="${l.id}" title="${l.id === active ? 'Tippen zum Bearbeiten' : ''}">
+        <span>${esc(l.emoji)}</span><span>${esc(l.name)}</span>${l.id === active ? '<span class="loc-chip-edit">✏️</span>' : ''}</button>`).join('')}
     <button class="loc-chip add" data-loc-add title="Ort hinzufügen">＋</button>
   </div>`;
 }
+// Orte werden über die Reiter selbst bearbeitet: Tippen auf den bereits
+// aktiven Reiter öffnet den Bearbeiten-Dialog, sonst wechselt es den Ort.
 function wireLocationBar(root) {
-  $$('[data-loc-sel]', root).forEach(b => b.onclick = () => { DB.setActiveLocation(b.dataset.locSel); render(); });
+  $$('[data-loc-sel]', root).forEach(b => b.onclick = () => {
+    const clickedId = b.dataset.locSel;
+    if (clickedId === DB.getActiveLocationId()) { editLocationModal(clickedId); return; }
+    DB.setActiveLocation(clickedId); render();
+  });
   const add = $('[data-loc-add]', root); if (add) add.onclick = () => editLocationModal(null);
 }
 // kleines Orts-Kürzel-Badge (Emoji/Kürzel des Ortes)
@@ -1109,7 +1137,7 @@ function render() {
 function updateTabs(hash) {
   const map = { '/': 'home', '/plans': 'plans', '/calendar': 'calendar', '/stats': 'stats', '/library': 'library' };
   let active = 'home';
-  if (hash.startsWith('/plans') || hash.startsWith('/location') || hash.startsWith('/plan') || hash.startsWith('/day')) active = 'plans';
+  if (hash.startsWith('/plans') || hash.startsWith('/plan') || hash.startsWith('/day')) active = 'plans';
   else if (hash.startsWith('/calendar')) active = 'calendar';
   else if (hash.startsWith('/stats')) active = 'stats';
   else if (hash.startsWith('/library') || hash.startsWith('/exercise')) active = 'library';
@@ -1142,9 +1170,7 @@ route('/', () => {
 
   const locId = active.id;
   const unfinished = DB.sessions().filter(s => !s.finishedAt && s.locationId === locId);
-  const recent = DB.sessions().filter(s => s.finishedAt && s.locationId === locId).slice(0, 3);
-  const plans = DB.plansByLocation(locId);
-  const daysInLoc = plans.flatMap(p => DB.daysByPlan(p.id));
+  const recent = DB.sessions().filter(s => s.finishedAt && s.locationId === locId).slice(0, 5);
 
   if (unfinished.length) {
     html += `<div class="section-title">Laufendes Training</div>`;
@@ -1163,42 +1189,24 @@ route('/', () => {
     });
   }
 
-  html += `<div class="section-title">Schnellstart · ${esc(active.emoji)} ${esc(active.name)}</div>`;
-  if (!daysInLoc.length) {
-    html += `<div class="empty">
-      <div class="big">🏋️</div>
-      <div>Für „${esc(active.name)}" gibt es noch keine Trainingstage.</div>
-      <div class="tiny" style="margin:8px 0 14px">Lege einen Plan und Trainingstage für diesen Ort an.</div>
-      <a class="btn primary" href="#/plans">Plan einrichten</a>
-    </div>`;
-  } else {
-    plans.forEach(p => {
-      const days = DB.daysByPlan(p.id);
-      if (!days.length) return;
-      html += `<div class="card">
-        <div class="tiny muted" style="margin:0 0 6px">${esc(p.emoji)} ${esc(p.name)}</div>`;
-      days.forEach(day => {
-        html += `<div class="list-row" data-start="${day.id}" style="margin-bottom:8px">
-          <div class="chip" style="background:${esc(day.color)}22;color:${esc(day.color)}">${esc(day.emoji)}</div>
-          <div class="grow"><div class="r-title">${esc(day.name)}</div>
-            <div class="r-sub">${day.exercises.length} Übungen</div></div>
-          <span class="btn good sm">Start ▶</span>
-        </div>`;
-      });
-      html += `</div>`;
-    });
-  }
-
   if (recent.length) {
     html += `<div class="section-title" style="display:flex;justify-content:space-between">
       <span>Zuletzt</span><a href="#/history" class="tiny">alle ›</a></div>`;
     recent.forEach(s => { html += sessionRow(s); });
   }
 
+  if (!unfinished.length && !recent.length) {
+    html += `<div class="empty">
+      <div class="big">💪</div>
+      <div>Bereit für dein nächstes Training?</div>
+      <div class="tiny" style="margin:8px 0 14px">Wähle unter „Pläne" einen Trainingstag zum Starten.</div>
+      <a class="btn primary" href="#/plans">Zu den Plänen</a>
+    </div>`;
+  }
+
   appEl.innerHTML = html;
   wireLocationBar(appEl);
   $$('[data-goto]', appEl).forEach(n => n.onclick = () => navigate(n.dataset.goto));
-  $$('[data-start]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); startTraining(n.dataset.start); });
   $$('[data-session]', appEl).forEach(n => n.onclick = () => navigate('/train/' + n.dataset.session));
 });
 
@@ -1237,9 +1245,7 @@ route('/plans', () => {
   const active = DB.getActiveLocation();
   const plans = DB.plansByLocation(active.id);
 
-  html += `<div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
-    <span>Pläne · ${esc(active.emoji)} ${esc(active.name)}</span>
-    <button class="btn ghost sm" data-edit-loc>✏️ Ort</button></div>`;
+  html += `<div class="section-title">Pläne · ${esc(active.emoji)} ${esc(active.name)}</div>`;
 
   if (!plans.length) {
     html += `<div class="empty"><div class="big">📋</div><div>Noch keine Pläne an diesem Ort.</div>
@@ -1247,18 +1253,30 @@ route('/plans', () => {
   } else {
     plans.forEach(p => {
       const days = DB.daysByPlan(p.id);
-      html += `<div class="list-row" data-plan="${p.id}">
-        <div class="chip" style="background:${esc(p.color)}22;color:${esc(p.color)}">${esc(p.emoji)}</div>
-        <div class="grow"><div class="r-title">${esc(p.name)}</div>
-          <div class="r-sub">${days.length} Trainingstage</div></div>
-        <span class="arrow">›</span></div>`;
+      html += `<details class="plan-acc">
+        <summary>
+          <div class="chip" style="background:${esc(p.color)}22;color:${esc(p.color)}">${esc(p.emoji)}</div>
+          <div class="grow"><div class="r-title">${esc(p.name)}</div>
+            <div class="r-sub">${days.length} Trainingstage</div></div>
+          <button class="btn ghost sm" data-edit-plan="${p.id}" title="Plan verwalten">✏️</button>
+          <span class="acc-chevron">⌄</span>
+        </summary>
+        <div class="plan-acc-body">
+          ${days.length ? days.map(day => `<div class="list-row" data-start="${day.id}">
+              <div class="chip" style="background:${esc(day.color)}22;color:${esc(day.color)}">${esc(day.emoji)}</div>
+              <div class="grow"><div class="r-title">${esc(day.name)}</div>
+                <div class="r-sub">${day.exercises.length} Übungen</div></div>
+              <span class="btn good sm">Start ▶</span>
+            </div>`).join('') : `<div class="tiny muted center" style="padding:8px 4px">Noch keine Trainingstage – tippe auf ✏️ zum Einrichten.</div>`}
+        </div>
+      </details>`;
     });
   }
 
   appEl.innerHTML = html;
   wireLocationBar(appEl);
-  const editLoc = $('[data-edit-loc]', appEl); if (editLoc) editLoc.onclick = () => editLocationModal(active.id);
-  $$('[data-plan]', appEl).forEach(n => n.onclick = () => navigate('/plan/' + n.dataset.plan));
+  $$('[data-edit-plan]', appEl).forEach(b => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); navigate('/plan/' + b.dataset.editPlan); });
+  $$('[data-start]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); startTraining(n.dataset.start); });
   appEl.append(el('button', { class: 'fab', onclick: () => editPlanModal(null, active.id) }, '+'));
 });
 
@@ -1291,32 +1309,6 @@ function editLocationModal(id) {
   });
 }
 
-// ============================================================
-//  Ansicht: Ort-Detail (Pläne des Orts)
-// ============================================================
-route('/location/:id', ({ id }) => {
-  const loc = DB.getLocation(id);
-  if (!loc) return navigate('/plans');
-  setChrome({ title: `${loc.emoji} ${loc.name}`, back: true, actions: [actionBtn('✏️', () => editLocationModal(id))] });
-  const plans = DB.plansByLocation(id);
-  let html = `<div class="section-title">Trainingspläne</div>`;
-  if (!plans.length) {
-    html += `<div class="empty"><div class="big">📋</div><div>Noch keine Pläne an diesem Ort.</div></div>`;
-  } else {
-    plans.forEach(p => {
-      const days = DB.daysByPlan(p.id);
-      html += `<div class="list-row" data-plan="${p.id}">
-        <div class="chip" style="background:${esc(p.color)}22;color:${esc(p.color)}">${esc(p.emoji)}</div>
-        <div class="grow"><div class="r-title">${esc(p.name)}</div>
-          <div class="r-sub">${days.length} Trainingstage</div></div>
-        <span class="arrow">›</span></div>`;
-    });
-  }
-  appEl.innerHTML = html;
-  $$('[data-plan]', appEl).forEach(n => n.onclick = () => navigate('/plan/' + n.dataset.plan));
-  appEl.append(el('button', { class: 'fab', onclick: () => editPlanModal(null, id) }, '+'));
-});
-
 function editPlanModal(id, locationId) {
   const p = id ? DB.getPlan(id) : { name: '', emoji: '🏋️', color: COLORS[0], locationId };
   openModal({
@@ -1339,7 +1331,7 @@ function editPlanModal(id, locationId) {
       const del = $('[data-del]', m);
       if (del) del.onclick = async () => {
         if (await confirmDialog('Plan inkl. Trainingstage löschen?', { danger: true, okText: 'Löschen' })) {
-          const lid = p.locationId; DB.deletePlan(id); close(); navigate('/location/' + lid);
+          DB.deletePlan(id); close(); navigate('/plans');
         }
       };
     },
