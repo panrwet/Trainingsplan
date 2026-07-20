@@ -934,6 +934,21 @@ function importData(json, mode = 'replace') {
       const existing = new Set(d[k].map(x => x.id));
       (incoming[k] || []).forEach(x => { if (!existing.has(x.id)) d[k].push(x); });
     });
+    // Muskelgruppen/Geräte-Arten nach Name deduplizieren (nicht nach id) - sonst
+    // könnten z.B. zwei "Brust"-Einträge mit unterschiedlicher id entstehen.
+    ['muscleGroups', 'equipmentTypes'].forEach(k => {
+      const existingNames = new Set(d[k].map(x => x.name.toLowerCase()));
+      (incoming[k] || []).forEach(x => {
+        if (x.name && !existingNames.has(x.name.toLowerCase())) { d[k].push(x); existingNames.add(x.name.toLowerCase()); }
+      });
+    });
+    // Geräte-Notizen sind pro (Übung, Ort) eindeutig - nach diesem Schlüssel
+    // deduplizieren, nicht nach id.
+    const existingNoteKeys = new Set(d.exerciseNotes.map(n => n.exerciseId + '|' + n.locationId));
+    (incoming.exerciseNotes || []).forEach(n => {
+      const key = n.exerciseId + '|' + n.locationId;
+      if (!existingNoteKeys.has(key)) { d.exerciseNotes.push(n); existingNoteKeys.add(key); }
+    });
   }
   save();
 }
@@ -1135,7 +1150,6 @@ function render() {
   navigate('/');
 }
 function updateTabs(hash) {
-  const map = { '/': 'home', '/plans': 'plans', '/calendar': 'calendar', '/stats': 'stats', '/library': 'library' };
   let active = 'home';
   if (hash.startsWith('/plans') || hash.startsWith('/plan') || hash.startsWith('/day')) active = 'plans';
   else if (hash.startsWith('/calendar')) active = 'calendar';

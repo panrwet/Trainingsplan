@@ -185,7 +185,6 @@ function render() {
   navigate('/');
 }
 function updateTabs(hash) {
-  const map = { '/': 'home', '/plans': 'plans', '/calendar': 'calendar', '/stats': 'stats', '/library': 'library' };
   let active = 'home';
   if (hash.startsWith('/plans') || hash.startsWith('/plan') || hash.startsWith('/day')) active = 'plans';
   else if (hash.startsWith('/calendar')) active = 'calendar';
