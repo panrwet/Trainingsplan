@@ -716,6 +716,8 @@ function editExerciseModal(id, onSaved) {
   const usage = id ? DB.exerciseUsage(id) : 0;
   const muscles = new Set(ex.muscles || []);
   let equipment = ex.equipment || '';
+  const activeLoc = id ? DB.getActiveLocation() : null;
+  const locNote = activeLoc ? DB.getExerciseNote(id, activeLoc.id) : null;
   openModal({
     title: id ? 'Übung bearbeiten' : 'Neue Übung',
     body: `
@@ -726,7 +728,9 @@ function editExerciseModal(id, onSaved) {
       <div class="filter-row" id="f-equip" style="margin:-4px 0 12px"></div>
       <label class="field"><span>Einheit</span>
         <select id="f-unit"><option value="kg"${ex.unit === 'kg' ? ' selected' : ''}>kg</option><option value="lb"${ex.unit === 'lb' ? ' selected' : ''}>lb</option></select></label>
-      <label class="field"><span>Notiz (optional)</span><textarea id="f-notes" placeholder="Technik-Hinweise, Einstellung am Gerät …">${esc(ex.notes)}</textarea></label>`,
+      <label class="field"><span>Technik-Hinweis (optional, ortsunabhängig)</span><textarea id="f-notes" placeholder="z.B. Griff schulterbreit, Ellbogen anlegen …">${esc(ex.notes)}</textarea></label>
+      ${activeLoc ? `<label class="field"><span>Geräte-Notiz für ${esc(activeLoc.name)} (dauerhaft, nur an diesem Ort)</span>
+        <textarea id="f-locnote" placeholder="z.B. Sitzhöhe 4, Griffbreite außen …">${esc(locNote?.text || '')}</textarea></label>` : ''}`,
     footer: `${id ? '<button class="btn danger" data-del>Löschen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
     onMount: (m, close) => {
       function redrawMuscles() {
@@ -764,6 +768,7 @@ function editExerciseModal(id, onSaved) {
         };
         let savedId = id;
         if (id) DB.updateExercise(id, data); else savedId = DB.addExercise(data).id;
+        if (activeLoc) DB.setExerciseNote(savedId, activeLoc.id, $('#f-locnote', m).value);
         close();
         if (onSaved) onSaved(savedId); else render();
       };
@@ -1014,7 +1019,7 @@ function renderTrain(container, id) {
   $('#addEx', container).onclick = () => pickExerciseModal(exId => {
     const ex = DB.getExercise(exId);
     const s2 = DB.getSession(id);
-    s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: 10, targetSets: 3, restSec: DB.db().settings.defaultRestSec, note: '', sets: [{ weight: '', reps: '', done: false }] });
+    s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: 10, targetSets: 3, restSec: DB.db().settings.defaultRestSec, sets: [{ weight: '', reps: '', done: false }] });
     DB.save(); renderTrain(container, id);
   });
 
@@ -1073,7 +1078,10 @@ function renderEntries(container, id) {
     const last = DB.lastEntryFor(entry.exerciseId, id, s.locationId);
     const ex = DB.getExercise(entry.exerciseId);
     const badges = tagBadgesHTML(ex);
-    const noteHTML = entry.note ? `<div class="ex-note">📝 ${esc(entry.note)}</div>` : '';
+    // Dauerhafte Geräte-/Einstellungs-Notiz, je Übung UND Ort (z.B. Sitzhöhe) -
+    // nicht ans einzelne Training gebunden, bleibt für nächstes Mal erhalten.
+    const noteRec = DB.getExerciseNote(entry.exerciseId, s.locationId);
+    const noteHTML = noteRec ? `<div class="ex-note">📝 ${esc(noteRec.text)}</div>` : '';
     const block = el('div', { class: 'ex-block' });
     block.innerHTML = `
       <div class="ex-head">
@@ -1115,7 +1123,7 @@ function renderEntries(container, id) {
       setsEl.append(row);
     });
 
-    $('[data-menu]', block).onclick = () => exerciseMenuModal(entry, {
+    $('[data-menu]', block).onclick = () => exerciseMenuModal(entry, !!noteRec, {
       onAddSet: () => {
         const prev = entry.sets[entry.sets.length - 1];
         entry.sets.push({ weight: prev ? prev.weight : '', reps: prev ? prev.reps : '', done: false });
@@ -1126,7 +1134,7 @@ function renderEntries(container, id) {
         entry.sets.pop(); DB.save(); renderEntries(container, id);
       },
       onRest: () => editRestModal(entry, () => renderEntries(container, id)),
-      onNote: () => editNoteModal(entry, () => renderEntries(container, id)),
+      onNote: () => editExerciseNoteModal(entry.exerciseId, s.locationId, () => renderEntries(container, id)),
       onRemoveExercise: async () => {
         if (await confirmDialog('Übung aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
           s.entries.splice(ei, 1); DB.save(); renderEntries(container, id);
@@ -1139,14 +1147,14 @@ function renderEntries(container, id) {
 
 // Kompaktes Aktions-Menü für eine Übung im laufenden Training (ersetzt die
 // vorherigen Einzel-Buttons für Pause/Löschen -> schlankerer Übungskopf).
-function exerciseMenuModal(entry, actions) {
+function exerciseMenuModal(entry, hasNote, actions) {
   openModal({
     title: entry.name,
     body: `<div class="sheet">
       <button class="sheet-btn" data-act="rest">⏱ Pause ändern <span class="tiny muted">(aktuell ${entry.restSec}s)</span></button>
       <button class="sheet-btn" data-act="addset">＋ Satz hinzufügen</button>
       <button class="sheet-btn" data-act="rmset">－ Letzten Satz entfernen</button>
-      <button class="sheet-btn" data-act="note">📝 ${entry.note ? 'Notiz bearbeiten' : 'Notiz hinzufügen'}</button>
+      <button class="sheet-btn" data-act="note">📝 ${hasNote ? 'Notiz bearbeiten' : 'Notiz hinzufügen'}</button>
       <button class="sheet-btn danger" data-act="remove">🗑️ Übung aus Training entfernen</button>
     </div>`,
     footer: `<button class="btn ghost block" data-x>Abbrechen</button>`,
@@ -1161,18 +1169,22 @@ function exerciseMenuModal(entry, actions) {
   });
 }
 
-// Notiz zu einer Übung innerhalb dieses Trainings (nur sichtbar, wenn gesetzt).
-function editNoteModal(entry, after) {
+// Dauerhafte Geräte-/Einstellungs-Notiz zu einer Übung an einem bestimmten Ort
+// (z.B. Sitzhöhe, Widerstand) - bleibt für alle künftigen Trainings erhalten,
+// getrennt je Ort (Geräte-Einstellungen sind zwischen Gyms nicht vergleichbar).
+function editExerciseNoteModal(exerciseId, locationId, after) {
+  const loc = DB.getLocation(locationId);
+  const existing = DB.getExerciseNote(exerciseId, locationId);
   openModal({
-    title: 'Notiz',
-    body: `<label class="field"><span>Notiz zu dieser Übung (nur für dieses Training)</span>
-      <textarea id="f-exnote" placeholder="z.B. Schulter zwickt, Griff geändert …">${esc(entry.note || '')}</textarea></label>`,
-    footer: `${entry.note ? '<button class="btn danger" data-del>Entfernen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    title: 'Geräte-Notiz',
+    body: `<label class="field"><span>Notiz${loc ? ` für ${esc(loc.name)}` : ''} – bleibt dauerhaft gespeichert</span>
+      <textarea id="f-exnote" placeholder="z.B. Sitzhöhe 4, Griffbreite außen …">${esc(existing?.text || '')}</textarea></label>`,
+    footer: `${existing ? '<button class="btn danger" data-del>Entfernen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
     onMount: (m, close) => {
       $('[data-x]', m).onclick = close;
-      $('[data-ok]', m).onclick = () => { entry.note = $('#f-exnote', m).value.trim(); DB.save(); close(); after && after(); };
+      $('[data-ok]', m).onclick = () => { DB.setExerciseNote(exerciseId, locationId, $('#f-exnote', m).value); close(); after && after(); };
       const del = $('[data-del]', m);
-      if (del) del.onclick = () => { entry.note = ''; DB.save(); close(); after && after(); };
+      if (del) del.onclick = () => { DB.setExerciseNote(exerciseId, locationId, ''); close(); after && after(); };
     },
   });
 }
@@ -1221,6 +1233,7 @@ function startRest(sec) {
   stopRest();
   restTimer = { remaining: sec, iv: null };
   updateRestBar();
+  acquireWakeLock();
   restTimer.iv = setInterval(() => {
     restTimer.remaining--;
     if (restTimer.remaining <= 0) { beep(); stopRest(); toast('Pause vorbei ▶'); }
@@ -1232,7 +1245,29 @@ function stopRest() {
   restTimer = null;
   const bar = document.getElementById('restBar');
   if (bar) bar.classList.add('hidden');
+  releaseWakeLock();
 }
+
+// ---------- Wake Lock ----------
+// Hält den Bildschirm während des Pausen-Timers wach (sonst schaltet sich das
+// Handy mitten in der Pause ab). Nicht unterstützt: stiller Fallback, App
+// funktioniert trotzdem normal weiter (nur der Screen schläft ggf. ein).
+let wakeLock = null;
+async function acquireWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (e) { /* z.B. Tab im Hintergrund oder vom Browser abgelehnt */ }
+}
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+}
+// Wake Lock wird vom Browser automatisch freigegeben, wenn der Tab in den
+// Hintergrund geht - beim Zurückkehren erneut anfordern, falls der Timer noch läuft.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && restTimer && !wakeLock) acquireWakeLock();
+});
 // Gemeinsamer AudioContext + Freischaltung.
 // iOS/Safari erlaubt Ton nur, wenn der AudioContext einmal per Nutzer-Geste
 // gestartet wurde. Deshalb beim ersten Antippen freischalten – danach kann

@@ -25,6 +25,7 @@ const DEFAULTS = () => ({
   exercises: [],   // Bibliothek: {id,name,muscles[],equipment,notes,unit,createdAt}
   muscleGroups: DEFAULT_MUSCLES.map(name => ({ id: uid('mg'), name, createdAt: Date.now() })),   // {id,name,createdAt}
   equipmentTypes: DEFAULT_EQUIPMENT.map(name => ({ id: uid('eq'), name, createdAt: Date.now() })), // {id,name,createdAt}
+  exerciseNotes: [], // Dauerhafte Geräte-/Einstellungs-Notiz je Übung UND Ort: {id,exerciseId,locationId,text,updatedAt}
   locations: [],   // Orte:        {id,name,emoji,color,createdAt}
   plans: [],       // Pläne:       {id,locationId,name,emoji,color,createdAt}
   days: [],        // Trainingstage:{id,planId,name,emoji,color,order,exercises:[{id,exerciseId,sets,reps,restSec}],createdAt}
@@ -78,11 +79,36 @@ export function deleteExercise(id) {
   d.exercises = d.exercises.filter(e => e.id !== id);
   // Aus Trainingstagen entfernen
   d.days.forEach(day => { day.exercises = day.exercises.filter(x => x.exerciseId !== id); });
+  d.exerciseNotes = d.exerciseNotes.filter(n => n.exerciseId !== id);
   save();
 }
 // Wie oft wurde eine Übung in Einheiten genutzt (für Löschwarnung)
 export function exerciseUsage(id) {
   return db().sessions.filter(s => (s.entries || []).some(e => e.exerciseId === id)).length;
+}
+
+// ---------- Dauerhafte Geräte-/Einstellungs-Notiz je Übung + Ort ----------
+// Getrennt vom allgemeinen Übungs-"notes"-Feld (Technik-Hinweise, ortsunabhängig):
+// Geräte-Einstellungen (z.B. Sitzhöhe) sind zwischen Gyms nicht vergleichbar,
+// deshalb eine eigene Notiz je (Übung, Ort)-Kombination.
+export function getExerciseNote(exerciseId, locationId) {
+  if (!exerciseId || !locationId) return null;
+  return db().exerciseNotes.find(n => n.exerciseId === exerciseId && n.locationId === locationId) || null;
+}
+export function setExerciseNote(exerciseId, locationId, text) {
+  if (!exerciseId || !locationId) return null;
+  text = String(text || '').trim();
+  const d = db();
+  let n = d.exerciseNotes.find(x => x.exerciseId === exerciseId && x.locationId === locationId);
+  if (!text) {
+    if (n) d.exerciseNotes = d.exerciseNotes.filter(x => x !== n);
+    save();
+    return null;
+  }
+  if (n) { n.text = text; n.updatedAt = Date.now(); }
+  else { n = { id: uid('exn'), exerciseId, locationId, text, updatedAt: Date.now() }; d.exerciseNotes.push(n); }
+  save();
+  return n;
 }
 
 // ---------- Muskelgruppen (selbst verwaltbar, für Filter + Übungs-Tagging) ----------
@@ -178,6 +204,7 @@ export function deleteLocation(id) {
   d.plans = d.plans.filter(p => p.locationId !== id);
   d.days = d.days.filter(day => !planIds.includes(day.planId));
   d.locations = d.locations.filter(l => l.id !== id);
+  d.exerciseNotes = d.exerciseNotes.filter(n => n.locationId !== id);
   save();
 }
 
@@ -271,7 +298,6 @@ export function startSession(dayId) {
       targetReps: item.reps,
       targetSets: item.sets,
       restSec: item.restSec,
-      note: '',
       sets,
     };
   });

@@ -13,10 +13,10 @@ Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – instal
 - **Plan in ein anderes Gym übernehmen** – ein Trainingsplan (inkl. aller Trainingstage & Zielwerte) lässt sich per Knopfdruck als unabhängige Kopie an einen anderen Ort kopieren, da das Kerntraining ja gleich bleibt. Original und Kopie sind danach getrennt frei änderbar.
 - **Training aufzeichnen** – Gewicht & Wiederholungen je Satz eingeben, als Platzhalter direkt der letzte Wert (je Ort).
 - **Schlanker Übungskopf im Training** – nur Name + „⋮"-Menü. Darin: Pause ändern, Satz hinzufügen/entfernen, Notiz, Übung entfernen.
-- **Notiz je Übung im Training** – nur sichtbar, wenn eine gesetzt ist (über das „⋮"-Menü anlegbar), erscheint dann als eigenes Feld unter Übungsname/Menü.
+- **Dauerhafte Geräte-Notiz je Übung + Ort** – z. B. „Sitzhöhe 4, Griff außen". Bleibt für alle künftigen Trainings erhalten (kein Session-Zettel), getrennt je Ort (Geräte-Einstellungen sind zwischen Gyms nicht vergleichbar). Nur sichtbar, wenn eine gesetzt ist; editierbar über das „⋮"-Menü im Training **oder** direkt in der Bibliothek. Davon getrennt: ein allgemeiner, ortsunabhängiger „Technik-Hinweis" je Übung in der Bibliothek (z. B. „Griff schulterbreit").
 - **Sätze, Pausen & Übungen anpassbar** – beim Erstellen des Plans **und** während des Trainings. Nach dem Training wird **je Änderung einzeln gefragt**, ob sie in den Trainingsplan übernommen werden soll (z. B. neue Pausenzeit, mehr/weniger Sätze, hinzugefügte/entfernte Übung) – oder nur für diese eine Einheit gilt.
-- **Pausen-Timer** – Countdown nach jedem abgehakten Satz (mit Ton/Vibration).
-- **Notizen** je Trainingseinheit (gesamtes Training) zusätzlich zu den Notizen je Übung.
+- **Pausen-Timer** – Countdown nach jedem abgehakten Satz (mit Ton/Vibration), hält währenddessen den **Bildschirm wach** (Wake Lock, wo vom Browser unterstützt).
+- **Notizen** je Trainingseinheit (gesamtes Training) zusätzlich zu den Geräte-Notizen je Übung.
 - **Statistiken je Übung** – geschätztes 1RM (Epley), max. Gewicht, Volumen, persönliche Rekorde und ein Verlaufs-Chart, je Ort getrennt.
 - **Kalender / Habit-Tracker** – jeder Trainingstag & Plan bekommt ein **Kürzel oder Emoji**, das im Monatskalender erscheint. Plus Wochen-Streak.
 - **Backup** – Export/Import als JSON-Datei.
@@ -88,6 +88,8 @@ Danach läuft die App im Vollbild wie eine native App und funktioniert offline.
   (iOS schaltet Audio erst nach einer Nutzer-Geste frei – ist eingebaut).
 - **Vibration** unterstützt iOS-Safari generell nicht (nur Android). Der sichtbare
   Countdown läuft trotzdem.
+- **Wake Lock (Bildschirm bleibt an)** funktioniert ab iOS 16.4. Auf älteren
+  Versionen: stiller Fallback, der Timer läuft trotzdem normal weiter.
 - Mach in jedem Fall regelmäßig ein **Backup** (*Einstellungen → Export*).
 
 ## Erste Schritte
