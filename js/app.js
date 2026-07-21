@@ -575,17 +575,23 @@ route('/day/:id', ({ id }) => {
   const plan = DB.getPlan(day.planId);
   const loc = plan ? DB.getLocation(plan.locationId) : null;
   let selectMode = false;
+  let reorderMode = false;
   const selected = new Set();
 
   function draw() {
-    setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: selectMode ? [] : [actionBtn('✏️', () => editDayModal(id, day.planId))] });
+    const anyMode = selectMode || reorderMode;
+    setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: anyMode ? [] : [actionBtn('✏️', () => editDayModal(id, day.planId))] });
 
     let html = `${loc ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(loc.emoji)} ${esc(loc.name)} · ${esc(plan.emoji)} ${esc(plan.name)}</div>` : ''}`;
-    if (!selectMode) html += `<button class="btn good block" id="startBtn" style="margin-bottom:16px">▶ Training starten</button>`;
+    if (!anyMode) html += `<button class="btn good block" id="startBtn" style="margin-bottom:16px">▶ Training starten</button>`;
     html += `<div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
       <span>Übungen</span>
       ${selectMode ? `<span class="tiny muted">${selected.size} ausgewählt</span>`
-        : (day.exercises.length > 1 ? `<button class="btn ghost sm" id="startGroupBtn">🔗 Zirkel erstellen</button>` : '')}
+        : reorderMode ? `<span class="tiny muted">Reihenfolge anpassen</span>`
+        : (day.exercises.length > 1 ? `<div style="display:flex;gap:6px">
+            <button class="btn ghost sm" id="startGroupBtn">🔗 Zirkel erstellen</button>
+            <button class="btn ghost sm" id="startReorderBtn">↕ Reihenfolge</button>
+          </div>` : '')}
     </div>`;
 
     if (!day.exercises.length) {
@@ -594,6 +600,18 @@ route('/day/:id', ({ id }) => {
     } else if (selectMode) {
       html += `<p class="tiny muted" style="margin-top:0">Wähle 2 oder mehr Übungen, die als Zirkel ohne Pause dazwischen trainiert werden sollen.</p>`;
       day.exercises.forEach(item => { html += dayExerciseCardHTML(item, true, selected); });
+    } else if (reorderMode) {
+      html += `<p class="tiny muted" style="margin-top:0">Mit ▲/▼ die Reihenfolge der Übungen ändern.</p>`;
+      day.exercises.forEach((item, idx) => {
+        const ex = DB.getExercise(item.exerciseId);
+        html += `<div class="card">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="grow"><b>${esc(ex ? ex.name : '(gelöscht)')}</b></div>
+            <span class="mv" data-up="${item.id}" style="padding:4px 8px;color:${idx === 0 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${idx === 0 ? 'none' : 'auto'}">▲</span>
+            <span class="mv" data-down="${item.id}" style="padding:4px 8px;color:${idx === day.exercises.length - 1 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${idx === day.exercises.length - 1 ? 'none' : 'auto'}">▼</span>
+          </div>
+        </div>`;
+      });
     } else {
       let i = 0;
       while (i < day.exercises.length) {
@@ -635,10 +653,23 @@ route('/day/:id', ({ id }) => {
       return;
     }
 
+    if (reorderMode) {
+      const ids = day.exercises.map(x => x.id);
+      $$('[data-up]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.up, -1); DB.reorderDayExercises(id, ids); draw(); });
+      $$('[data-down]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.down, +1); DB.reorderDayExercises(id, ids); draw(); });
+      const bar = el('div', { class: 'select-bar' });
+      bar.innerHTML = `<button class="btn primary block" id="doneReorderBtn">Fertig</button>`;
+      appEl.append(bar);
+      $('#doneReorderBtn', bar).onclick = () => { reorderMode = false; render(); };
+      return;
+    }
+
     const startBtn = $('#startBtn', appEl);
     if (startBtn) startBtn.onclick = () => { if (!day.exercises.length) return toast('Erst Übungen hinzufügen'); startTraining(id); };
     const startGroupBtn = $('#startGroupBtn', appEl);
     if (startGroupBtn) startGroupBtn.onclick = () => { selectMode = true; selected.clear(); draw(); };
+    const startReorderBtn = $('#startReorderBtn', appEl);
+    if (startReorderBtn) startReorderBtn.onclick = () => { reorderMode = true; draw(); };
     const ids = day.exercises.map(x => x.id);
     $$('[data-up]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.up, -1); DB.reorderDayExercises(id, ids); render(); });
     $$('[data-down]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.down, +1); DB.reorderDayExercises(id, ids); render(); });
@@ -1334,8 +1365,11 @@ function exerciseMenuModal(entry, hasNote, isFirst, isLast, actions) {
     title: entry.name,
     body: `<div class="sheet">
       <button class="sheet-btn" data-act="rest">⏱ Pause ändern <span class="tiny muted">(aktuell ${entry.restSec}s)</span></button>
-      <button class="sheet-btn" data-act="addset">＋ Satz hinzufügen</button>
-      <button class="sheet-btn" data-act="rmset">－ Letzten Satz entfernen</button>
+      <div class="sheet-btn split">
+        <button class="split-half" data-act="rmset" aria-label="Letzten Satz entfernen">−</button>
+        <span class="split-label">Satz <span class="tiny muted">(${entry.sets.length})</span></span>
+        <button class="split-half" data-act="addset" aria-label="Satz hinzufügen">＋</button>
+      </div>
       <button class="sheet-btn" data-act="replace">🔄 Übung ersetzen</button>
       ${!isFirst ? '<button class="sheet-btn" data-act="up">↑ Nach oben verschieben</button>' : ''}
       ${!isLast ? '<button class="sheet-btn" data-act="down">↓ Nach unten verschieben</button>' : ''}
@@ -1669,8 +1703,14 @@ route('/stats', () => {
     </div>`;
 
   if (!list.length) {
+    // Statistik ist bewusst je Ort getrennt (Geräte zwischen Gyms nicht vergleichbar) - das
+    // kann verwirren, wenn Trainings an einem ANDEREN Ort liegen als dem gerade aktiven.
+    // Deshalb hier gezielt darauf hinweisen, statt nur "leer" zu zeigen.
+    const otherLocsWithData = DB.locations().filter(l => l.id !== active.id && DB.exercisesTrainedAtLocation(l.id).length);
     html += `<div class="empty"><div class="big">📈</div><div>Noch keine Trainingsdaten für „${esc(active.name)}".</div>
-      <div class="tiny" style="margin:8px 0 0">Zeichne an diesem Ort ein paar Trainings auf.</div></div>`;
+      <div class="tiny" style="margin:8px 0 0">Zeichne an diesem Ort ein paar Trainings auf.</div>
+      ${otherLocsWithData.length ? `<div class="tiny" style="margin:10px 0 0">Hinweis: An ${otherLocsWithData.map(l => `${esc(l.emoji)} ${esc(l.name)}`).join(', ')} liegen bereits aufgezeichnete Trainings – oben über die Orts-Reiter dorthin wechseln.</div>` : ''}
+      </div>`;
   } else {
     list.forEach(e => {
       const pr = DB.exercisePRs(e.id, active.id);

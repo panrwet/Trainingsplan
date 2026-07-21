@@ -299,6 +299,15 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 }
 .sheet-btn:active { transform: translateY(1px); }
 .sheet-btn.danger { color: var(--bad); }
+.sheet-btn.split { padding: 0; overflow: hidden; cursor: default; }
+.sheet-btn.split .split-half {
+  flex: 0 0 25%; align-self: stretch; background: transparent; border: none; color: var(--text);
+  font-size: 1.3rem; font-weight: 700; cursor: pointer; font-family: inherit; line-height: 1;
+}
+.sheet-btn.split .split-half:first-child { border-right: 1px solid var(--border); }
+.sheet-btn.split .split-half:last-child { border-left: 1px solid var(--border); }
+.sheet-btn.split .split-half:active { background: rgba(255, 255, 255, .06); }
+.sheet-btn.split .split-label { flex: 1; text-align: center; font-size: .88rem; }
 
 /* ---------- Muskel-/Geräte-Labels ---------- */
 .tag-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
