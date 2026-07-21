@@ -1692,6 +1692,41 @@ route('/stats', () => {
   const list = DB.exercisesTrainedAtLocation(active.id);
   html += `<p class="tiny muted">Statistik für <b>${esc(active.emoji)} ${esc(active.name)}</b> – je Ort getrennt, da Geräte zwischen Gyms nicht vergleichbar sind.</p>`;
 
+  if (!list.length) {
+    // Statistik ist bewusst je Ort getrennt (Geräte zwischen Gyms nicht vergleichbar) - das
+    // kann verwirren, wenn Trainings an einem ANDEREN Ort liegen als dem gerade aktiven.
+    // Deshalb hier gezielt darauf hinweisen, statt nur "leer" zu zeigen.
+    const otherLocsWithData = DB.locations().filter(l => l.id !== active.id && DB.exercisesTrainedAtLocation(l.id).length);
+    html += `<div class="empty"><div class="big">📈</div><div>Noch keine Trainingsdaten für „${esc(active.name)}".</div>
+      <div class="tiny" style="margin:8px 0 0">Zeichne an diesem Ort ein paar Trainings auf, oder aktiviere die Beispieldaten (Einstellungen → Daten &amp; Backup).</div>
+      ${otherLocsWithData.length ? `<div class="tiny" style="margin:10px 0 0">Hinweis: An ${otherLocsWithData.map(l => `${esc(l.emoji)} ${esc(l.name)}`).join(', ')} liegen bereits aufgezeichnete Trainings – oben über die Orts-Reiter dorthin wechseln.</div>` : ''}
+      </div>`;
+    appEl.innerHTML = html;
+    wireLocationBar(appEl);
+    return;
+  }
+
+  // ---------- Gesamt-Übersicht (übungsübergreifend) ----------
+  const freq = DB.weeklyFrequency(active.id, 8);
+  const totalFinished = DB.sessions().filter(s => s.finishedAt && s.locationId === active.id).length;
+  const avgPerWeek = freq.reduce((a, b) => a + b.count, 0) / freq.length;
+  const overallHist = DB.overallVolumeHistory(active.id, 26);
+  const overallChart = lineChart(overallHist.map(h => ({ y: h.volume, label: fmtShort(h.date) })), '');
+  const topEx = DB.topExercisesByFrequency(active.id, 5);
+  html += `<div class="section-title">Gesamt-Übersicht</div>
+    <div class="streak-row">
+      <div class="stat-tile"><div class="v">${totalFinished}</div><div class="l">Trainings gesamt</div></div>
+      <div class="stat-tile"><div class="v">${avgPerWeek.toFixed(1)}</div><div class="l">Ø Einheiten/Woche (8W)</div></div>
+    </div>
+    <div class="chart-wrap"><div class="c-title"><span>Trainingsvolumen je Einheit (alle Übungen)</span></div>${overallChart}</div>
+    <div class="card">
+      <div class="tiny muted" style="margin-bottom:6px">Meisttrainierte Übungen</div>
+      ${topEx.length ? topEx.map(t => `<div class="list-row" data-ex="${t.exerciseId}">
+          <div class="grow"><div class="r-title">${esc(t.name)}</div></div>
+          <div class="tiny muted">${t.count}×</div></div>`).join('')
+        : `<div class="tiny muted center" style="padding:8px">Noch keine Daten.</div>`}
+    </div>`;
+
   const volStats = DB.muscleVolumeStats(active.id, statsVolPeriod);
   html += `<div class="section-title">Muskelgruppen-Volumen</div>
     <div class="card">
@@ -1702,24 +1737,14 @@ route('/stats', () => {
       ${volumeBarsHTML(volStats)}
     </div>`;
 
-  if (!list.length) {
-    // Statistik ist bewusst je Ort getrennt (Geräte zwischen Gyms nicht vergleichbar) - das
-    // kann verwirren, wenn Trainings an einem ANDEREN Ort liegen als dem gerade aktiven.
-    // Deshalb hier gezielt darauf hinweisen, statt nur "leer" zu zeigen.
-    const otherLocsWithData = DB.locations().filter(l => l.id !== active.id && DB.exercisesTrainedAtLocation(l.id).length);
-    html += `<div class="empty"><div class="big">📈</div><div>Noch keine Trainingsdaten für „${esc(active.name)}".</div>
-      <div class="tiny" style="margin:8px 0 0">Zeichne an diesem Ort ein paar Trainings auf.</div>
-      ${otherLocsWithData.length ? `<div class="tiny" style="margin:10px 0 0">Hinweis: An ${otherLocsWithData.map(l => `${esc(l.emoji)} ${esc(l.name)}`).join(', ')} liegen bereits aufgezeichnete Trainings – oben über die Orts-Reiter dorthin wechseln.</div>` : ''}
-      </div>`;
-  } else {
-    list.forEach(e => {
-      const pr = DB.exercisePRs(e.id, active.id);
-      html += `<div class="list-row" data-ex="${e.id}">
-        <div class="grow"><div class="r-title">${esc(e.name)} ${locBadge(active)}</div>
-          <div class="r-sub">${pr.sessionsCount}× · Bestes 1RM ${fmtWeight(pr.best1rm)} kg · Max ${fmtWeight(pr.maxWeight)} kg</div></div>
-        <span class="arrow">›</span></div>`;
-    });
-  }
+  list.forEach(e => {
+    const pr = DB.exercisePRs(e.id, active.id);
+    html += `<div class="list-row" data-ex="${e.id}">
+      <div class="grow"><div class="r-title">${esc(e.name)} ${locBadge(active)}</div>
+        <div class="r-sub">${pr.sessionsCount}× · Bestes 1RM ${fmtWeight(pr.best1rm)} kg · Max ${fmtWeight(pr.maxWeight)} kg</div></div>
+      <span class="arrow">›</span></div>`;
+  });
+
   appEl.innerHTML = html;
   wireLocationBar(appEl);
   $$('[data-ex]', appEl).forEach(n => n.onclick = () => navigate('/stats/' + n.dataset.ex));
@@ -1882,6 +1907,7 @@ route('/settings', () => {
   const s = DB.db().settings;
   const stats = { ex: DB.exercises().length, loc: DB.locations().length, plans: DB.db().plans.length, days: DB.db().days.length, ses: DB.sessions().length };
   const trashCount = DB.trashedExercises().length + DB.trashedSessions().length;
+  const activeLoc = DB.getActiveLocation();
 
   appEl.innerHTML = `
     <div class="section-title">Design</div>
@@ -1949,6 +1975,11 @@ route('/settings', () => {
         <button class="btn" id="impBtn">⬆ Importieren</button>
       </div>
       <input type="file" id="impFile" accept="application/json,.json" hidden />
+      <hr class="sep" />
+      <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
+        <input id="s-demo" type="checkbox" ${s.demoDataEnabled ? 'checked' : ''} style="width:auto" />
+        <span style="margin:0">Beispieldaten (ca. 2 Monate Testtrainings)</span></label>
+      <p class="tiny muted" style="margin:8px 0 0">Erzeugt bzw. entfernt plausible Testeinheiten für <b>${activeLoc ? esc(activeLoc.emoji) + ' ' + esc(activeLoc.name) : 'den aktiven Ort'}</b>, um Statistik &amp; Kalender auszuprobieren. Braucht mindestens einen Trainingstag mit Übungen an diesem Ort.</p>
     </div>
 
     <div class="section-title">Papierkorb</div>
@@ -1960,7 +1991,9 @@ route('/settings', () => {
 
     <div class="section-title">Gefahrenzone</div>
     <div class="card">
-      <button class="btn danger block" id="wipeBtn">Alle Daten löschen</button>
+      <button class="btn danger block" id="wipeSessionsBtn">Nur Trainingseinheiten löschen (Pläne bleiben)</button>
+      <p class="tiny muted" style="margin:8px 0 0">Löscht alle aufgezeichneten Trainings (inkl. Papierkorb &amp; Beispieldaten) - Orte, Pläne und Trainingstage bleiben erhalten.</p>
+      <button class="btn danger block" id="wipeBtn" style="margin-top:14px">Alle Daten löschen</button>
     </div>
     <p class="tiny muted center" style="margin-top:14px">Trainingsplan · lokale PWA · v1</p>
   `;
@@ -2015,6 +2048,25 @@ route('/settings', () => {
 
   $('#openTrashBtn', appEl).onclick = () => openTrashModal();
 
+  $('#s-demo', appEl).onchange = e => {
+    if (e.target.checked) {
+      if (!activeLoc) { toast('Erst einen Ort anlegen'); e.target.checked = false; return; }
+      const n = DB.generateDemoSessions(activeLoc.id);
+      if (!n) { toast('Braucht mind. einen Trainingstag mit Übungen an diesem Ort'); e.target.checked = false; return; }
+      s.demoDataEnabled = true; DB.save();
+      toast(n + ' Beispiel-Trainings erzeugt');
+    } else {
+      DB.removeDemoSessions();
+      s.demoDataEnabled = false; DB.save();
+      toast('Beispieldaten entfernt');
+    }
+  };
+
+  $('#wipeSessionsBtn', appEl).onclick = async () => {
+    if (await confirmDialog('Alle aufgezeichneten Trainingseinheiten löschen? Orte, Pläne und Trainingstage bleiben erhalten.', { danger: true, okText: 'Trainingseinheiten löschen' })) {
+      DB.wipeSessions(); toast('Trainingseinheiten gelöscht'); render();
+    }
+  };
   $('#wipeBtn', appEl).onclick = async () => {
     if (await confirmDialog('Wirklich ALLE Daten unwiderruflich löschen?', { danger: true, okText: 'Alles löschen' })) {
       DB.wipeAll(); applyDisplaySettings(); toast('Alle Daten gelöscht'); navigate('/plans');

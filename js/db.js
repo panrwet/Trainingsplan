@@ -28,7 +28,7 @@ const DEFAULTS = () => ({
     // Anzeige/Design
     tagColors: true, theme: 'dark', accentColor: '#6c8cff', fontSize: 'medium', reducedMotion: false,
     // Daten
-    backupReminderWeeks: 0, lastBackupAt: null,
+    backupReminderWeeks: 0, lastBackupAt: null, demoDataEnabled: false,
     // intern
     seedVersion: 0,
   },
@@ -675,6 +675,123 @@ export function muscleVolumeStats(locationId = null, periodDays = 7) {
     }
   }
   return Object.entries(totals).map(([muscle, volume]) => ({ muscle, volume: Math.round(volume) })).sort((a, b) => b.volume - a.volume);
+}
+
+// ---------- Gesamt-Statistik (übungsübergreifend, je Ort) ----------
+// Gesamt-Trainingsvolumen je abgeschlossener Einheit (alle Übungen zusammen),
+// chronologisch aufsteigend - für den Gesamt-Trend-Chart auf der Statistik-Seite.
+export function overallVolumeHistory(locationId = null, limit = 26) {
+  const rows = [];
+  for (const s of db().sessions) {
+    if (locationId && s.locationId !== locationId) continue;
+    if (!s.finishedAt) continue;
+    let volume = 0, setCount = 0;
+    (s.entries || []).forEach(e => (e.sets || []).forEach(set => {
+      if (isWorkingDone(set)) { volume += num(set.weight) * num(set.reps); setCount++; }
+    }));
+    if (!setCount) continue;
+    rows.push({ sessionId: s.id, date: s.date, startedAt: s.startedAt || 0, volume: Math.round(volume), setCount });
+  }
+  rows.sort((a, b) => a.startedAt - b.startedAt);
+  return rows.slice(-limit);
+}
+
+// Trainingshäufigkeit je Woche über die letzten `weeks` Wochen (Woche 0 = die aktuelle).
+export function weeklyFrequency(locationId = null, weeks = 8) {
+  const now = Date.now();
+  const buckets = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const start = now - (i + 1) * 7 * 86400000;
+    const end = now - i * 7 * 86400000;
+    let count = 0;
+    for (const s of db().sessions) {
+      if (locationId && s.locationId !== locationId) continue;
+      if (!s.finishedAt) continue;
+      if (s.finishedAt >= start && s.finishedAt < end) count++;
+    }
+    buckets.push({ weekIndex: i, count });
+  }
+  return buckets;
+}
+
+// Meisttrainierte Übungen nach Häufigkeit (Anzahl Einheiten mit abgehaktem Satz).
+export function topExercisesByFrequency(locationId = null, limit = 5) {
+  const counts = new Map();
+  for (const s of db().sessions) {
+    if (locationId && s.locationId !== locationId) continue;
+    if (!s.finishedAt) continue;
+    (s.entries || []).forEach(e => {
+      if ((e.sets || []).some(isWorkingDone)) counts.set(e.exerciseId, (counts.get(e.exerciseId) || 0) + 1);
+    });
+  }
+  return Array.from(counts.entries())
+    .map(([exerciseId, count]) => ({ exerciseId, name: (getExercise(exerciseId) || {}).name || '(gelöscht)', count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
+// ---------- Beispieldaten (Testdaten für die Statistik, in Einstellungen an/abschaltbar) ----------
+// Erzeugt ca. 2 Monate plausibler, abgeschlossener Trainingseinheiten am angegebenen Ort,
+// basierend auf dessen TATSÄCHLICHEN Plänen/Trainingstagen (damit Übungs-/Muskelgruppen-
+// Statistik realistisch befüllt wird). Leicht ansteigende Gewichte simulieren Fortschritt,
+// vereinzelt ausgelassene Termine wirken weniger künstlich. Klar als `demo: true` markiert,
+// damit sie jederzeit sauber wieder entfernbar sind, ohne echte Trainingsdaten anzurühren.
+export function generateDemoSessions(locationId) {
+  const loc = getLocation(locationId); if (!loc) return 0;
+  const days = plansByLocation(locationId).flatMap(p => daysByPlan(p.id)).filter(d => d.exercises.length);
+  if (!days.length) return 0;
+  const now = Date.now();
+  const totalDays = 60;
+  let dayIdx = 0, count = 0;
+  for (let daysAgo = totalDays; daysAgo >= 0; daysAgo -= 2) {
+    if (Math.random() < 0.15) continue; // vereinzelt ausgelassene Einheiten
+    const day = days[dayIdx % days.length];
+    dayIdx++;
+    const ts = now - daysAgo * 86400000;
+    const d = new Date(ts);
+    const dateISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const progress = (totalDays - daysAgo) / totalDays; // 0..1 über den Zeitraum
+    const entries = day.exercises.map(item => {
+      const ex = getExercise(item.exerciseId);
+      const baseWeight = 20 + Math.random() * 40;
+      const sets = [];
+      for (let i = 0; i < item.sets; i++) {
+        const w = Math.round((baseWeight * (1 + progress * 0.15) + (Math.random() * 4 - 2)) * 2) / 2;
+        const r = Math.max(1, Math.round(item.reps + (Math.random() * 4 - 2)));
+        sets.push({ weight: Math.max(2.5, w), reps: r, done: true });
+      }
+      return {
+        exerciseId: item.exerciseId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg',
+        targetReps: item.reps, targetSets: item.sets, restSec: item.restSec, groupId: item.groupId || null, sets,
+      };
+    });
+    db().sessions.push({
+      id: uid('ses'), locationId, planId: day.planId, dayId: day.id, dayName: day.name,
+      date: dateISO, startedAt: ts, finishedAt: ts + 45 * 60000,
+      emoji: day.emoji, color: day.color, note: '', entries,
+      planSnapshot: day.exercises.map(item => ({ exerciseId: item.exerciseId, sets: item.sets, reps: item.reps, restSec: item.restSec, groupId: item.groupId || null })),
+      demo: true,
+    });
+    count++;
+  }
+  save();
+  return count;
+}
+export function removeDemoSessions() {
+  const d = db(); d.sessions = d.sessions.filter(s => !s.demo); save();
+}
+export function hasDemoSessions() {
+  return db().sessions.some(s => s.demo);
+}
+
+// Entfernt NUR die aufgezeichneten Trainingseinheiten (inkl. Papierkorb-Einheiten und
+// Beispieldaten) - Orte/Pläne/Trainingstage/Übungsbibliothek bleiben unangetastet.
+export function wipeSessions() {
+  const d = db();
+  d.sessions = [];
+  d.trashSessions = [];
+  d.settings.demoDataEnabled = false;
+  save();
 }
 
 // Einfache Suche über Pläne, Trainingstage, Übungen und vergangene Trainings hinweg.

@@ -19,7 +19,8 @@ Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – instal
 - **Sätze, Pausen, Reihenfolge, Zirkel & Übungen anpassbar** – beim Erstellen des Plans **und** während des Trainings. Nach dem Training wird, sofern in den Einstellungen aktiviert, **je Änderung einzeln gefragt**, ob sie in den Trainingsplan übernommen werden soll (neue Pausenzeit, mehr/weniger Sätze, hinzugefügte/entfernte Übung, geänderte Reihenfolge, angepasste Zirkel-Gruppierung) – oder nur für diese eine Einheit gilt.
 - **Pausen-Timer** – Countdown nach jedem abgehakten Satz (mit Ton/Vibration und optionaler Browser-Benachrichtigung, wenn die App gerade im Hintergrund ist), hält währenddessen den **Bildschirm wach** (Wake Lock, wo vom Browser unterstützt).
 - **Notizen** je Trainingseinheit (gesamtes Training) zusätzlich zu den Geräte-Notizen je Übung.
-- **Statistiken je Übung** – geschätztes 1RM (Epley), max. Gewicht, Volumen, persönliche Rekorde und ein Verlaufs-Chart, je Ort getrennt. Zusätzlich eine **Muskelgruppen-Volumen-Auswertung** (7/30 Tage) auf der Statistik-Seite.
+- **Statistiken je Übung** – geschätztes 1RM (Epley), max. Gewicht, Volumen, persönliche Rekorde und ein Verlaufs-Chart, je Ort getrennt. Zusätzlich eine **Gesamt-Übersicht** (Trainings gesamt, Ø Einheiten/Woche, Trainingsvolumen-Trend über alle Übungen, meisttrainierte Übungen) sowie eine **Muskelgruppen-Volumen-Auswertung** (7/30 Tage) auf der Statistik-Seite.
+- **Beispieldaten** – über *Einstellungen → Daten & Backup* an-/abschaltbar: erzeugt bzw. entfernt ca. 2 Monate plausibler Testtrainings am aktiven Ort, um Statistik & Kalender direkt auszuprobieren, ohne echte Daten zu verändern.
 - **Kalender / Habit-Tracker** – jeder Trainingstag & Plan bekommt ein **Kürzel oder Emoji**, das im Monatskalender erscheint. Plus Wochen-Streak und eine Liste der **letzten Trainings** darunter.
 - **Globale Suche** – über das 🔍-Symbol auf der Pläne-Seite, findet Pläne, Trainingstage, Übungen und vergangene Trainings.
 - **Papierkorb** – gelöschte Übungen und Trainings landen im Papierkorb (*Einstellungen → Papierkorb*) und lassen sich wiederherstellen oder endgültig entfernen.
@@ -117,6 +118,7 @@ gern an dein Niveau an – und lösch/deaktiviere, welche Pläne du nicht brauch
    Filter greifen).
 4. Fortschritt unter *Statistik* und *Kalender* verfolgen.
 
+> Nur die aufgezeichneten Trainings löschen (Orte/Pläne bleiben): *Einstellungen → Gefahrenzone → Nur Trainingseinheiten löschen*.
 > Zum kompletten Zurücksetzen: *Einstellungen → Alle Daten löschen*.
 
 ## Projektstruktur
