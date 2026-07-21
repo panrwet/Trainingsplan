@@ -60,6 +60,18 @@
 html[data-fontsize="small"] { font-size: 14px; }
 html[data-fontsize="large"] { font-size: 18px; }
 
+/* ---------- Abstände / Dichte (Einstellungen -> Design) ---------- */
+html[data-density="compact"] .card { padding: 8px; margin-bottom: 7px; }
+html[data-density="compact"] .list-row { padding: 7px 9px; margin-bottom: 6px; }
+html[data-density="compact"] .btn { padding: 8px 12px; }
+html[data-density="compact"] .section-title { margin: 10px 2px 5px; }
+html[data-density="compact"] .stat-tile { padding: 9px; }
+html[data-density="spacious"] .card { padding: 17px; margin-bottom: 14px; }
+html[data-density="spacious"] .list-row { padding: 14px 16px; margin-bottom: 11px; }
+html[data-density="spacious"] .btn { padding: 13px 18px; }
+html[data-density="spacious"] .section-title { margin: 20px 2px 9px; }
+html[data-density="spacious"] .stat-tile { padding: 16px; }
+
 /* ---------- Animationen reduzieren (Einstellungen -> Design) ---------- */
 html[data-reduced-motion="1"] *, html[data-reduced-motion="1"] *::before, html[data-reduced-motion="1"] *::after {
   transition-duration: .001ms !important; animation-duration: .001ms !important;
@@ -225,6 +237,13 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer;
 }
 .color-pick button.sel { border-color: var(--text); }
+.color-input {
+  -webkit-appearance: none; appearance: none; width: 34px; height: 34px; padding: 0;
+  border: 2px solid var(--border); border-radius: 50%; background: none; cursor: pointer; overflow: hidden;
+}
+.color-input::-webkit-color-swatch-wrapper { padding: 0; }
+.color-input::-webkit-color-swatch { border: none; border-radius: 50%; }
+.color-input::-moz-color-swatch { border: none; border-radius: 50%; }
 
 .theme-pick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .theme-pick button {
@@ -430,11 +449,11 @@ a { color: var(--accent); }
   margin-bottom: 6px; overflow: hidden;
 }
 .filter-acc summary {
-  list-style: none; cursor: pointer; padding: 10px 12px; display: flex; align-items: center;
-  font-size: .86rem; font-weight: 650; color: var(--text);
+  list-style: none; cursor: pointer; padding: 12px 14px; display: flex; align-items: center;
+  font-size: .86rem; font-weight: 650; color: var(--text); min-height: 24px;
 }
 .filter-acc summary::-webkit-details-marker { display: none; }
-.filter-acc summary::after { content: '⌄'; color: var(--text-dim2); margin-left: auto; font-size: 1rem; transition: transform .15s; }
+.filter-acc summary::after { content: '⌄'; color: var(--text-dim2); margin-left: auto; font-size: 1.5rem; line-height: 1; transition: transform .15s; }
 .filter-acc[open] summary::after { transform: rotate(180deg); }
 .filter-acc .filter-row { padding: 0 10px 10px; }
 .acc-badge {
@@ -466,7 +485,10 @@ a { color: var(--accent); }
 }
 .plan-acc summary .r-title { font-weight: 650; font-size: .95rem; }
 .plan-acc summary .r-sub { color: var(--text-dim); font-size: .8rem; margin-top: 1px; }
-.plan-acc .acc-chevron { color: var(--text-dim2); font-size: 1.1rem; transition: transform .15s; }
+.plan-acc .acc-chevron {
+  color: var(--text-dim2); font-size: 1.7rem; line-height: 1; transition: transform .15s;
+  width: 34px; height: 34px; display: grid; place-items: center; flex: 0 0 auto; margin: -6px;
+}
 .plan-acc[open] .acc-chevron { transform: rotate(180deg); }
 .plan-acc-body { padding: 0 10px 10px; }
 .plan-acc-body .list-row:last-child { margin-bottom: 0; }
@@ -475,11 +497,11 @@ a { color: var(--accent); }
 .stats-acc { margin: 0; }
 .stats-acc summary {
   list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
-  margin: 14px 2px 6px; font-size: .74rem; text-transform: uppercase; letter-spacing: .06em;
-  color: var(--text-dim2); font-weight: 700;
+  margin: 14px 0 6px; padding: 6px 2px; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-dim2); font-weight: 700; min-height: 20px;
 }
 .stats-acc summary::-webkit-details-marker { display: none; }
-.stats-acc summary::after { content: '⌄'; font-size: 1rem; transition: transform .15s; }
+.stats-acc summary::after { content: '⌄'; font-size: 1.6rem; line-height: 1; transition: transform .15s; }
 .stats-acc[open] summary::after { transform: rotate(180deg); }
 
 /* ---------- Trainings-Anpassungen nach dem Training (Diff-Modal) ---------- */

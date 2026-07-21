@@ -27,7 +27,7 @@ const DEFAULTS = () => ({
     weekStart: 'mon', askPlanDiff: true, restNotifications: false,
     // Anzeige/Design
     tagColors: true, theme: 'dark', accentColor: '#6c8cff', fontSize: 'medium', reducedMotion: false,
-    muscleColor: '#7dd3fc', equipColor: '#86efac',
+    muscleColor: '#7dd3fc', equipColor: '#86efac', density: 'normal', cornerStyle: 'normal',
     // Daten
     backupReminderWeeks: 0, lastBackupAt: null, demoDataEnabled: false,
     // intern

@@ -146,12 +146,17 @@ function withAlpha(hex, alpha) {
   const n = parseInt(String(hex).replace('#', ''), 16);
   return `rgba(${(n >> 16) & 0xff}, ${(n >> 8) & 0xff}, ${n & 0xff}, ${alpha})`;
 }
+const CORNER_RADII = { sharp: ['4px', '3px'], normal: ['12px', '9px'], round: ['20px', '16px'] };
 function applyDisplaySettings() {
   const s = DB.db().settings;
   const theme = resolveTheme(s.theme);
   document.documentElement.dataset.theme = theme;
   document.documentElement.dataset.fontsize = s.fontSize || 'medium';
   document.documentElement.dataset.reducedMotion = s.reducedMotion ? '1' : '0';
+  document.documentElement.dataset.density = s.density || 'normal';
+  const [radius, radiusSm] = CORNER_RADII[s.cornerStyle] || CORNER_RADII.normal;
+  document.documentElement.style.setProperty('--radius', radius);
+  document.documentElement.style.setProperty('--radius-sm', radiusSm);
   const accent = s.accentColor || '#6c8cff';
   document.documentElement.style.setProperty('--accent', accent);
   document.documentElement.style.setProperty('--accent-2', shade(accent, -0.22));
@@ -1732,10 +1737,12 @@ function discardSession(id) {
 //  Ansicht: Kalender (Habit-Tracker)
 // ============================================================
 let calState = null;
+let calRecentExpanded = false;
 route('/calendar', () => {
   setChrome({ title: 'Kalender', back: false });
   const now = new Date();
   if (!calState) calState = { y: now.getFullYear(), m: now.getMonth() };
+  calRecentExpanded = false;
   drawCalendar();
 });
 
@@ -1793,11 +1800,20 @@ function drawCalendar() {
     dayDetailModal(n.dataset.date, evs);
   });
 
-  const recent = DB.sessions().filter(s => s.finishedAt).slice(0, 8);
+  const RECENT_COLLAPSED_COUNT = 3;
+  const allFinished = DB.sessions().filter(s => s.finishedAt);
+  const recent = calRecentExpanded ? allFinished : allFinished.slice(0, RECENT_COLLAPSED_COUNT);
   const recentList = $('#recentList', appEl);
-  recentList.innerHTML = recent.length ? recent.map(s => sessionRow(s)).join('')
+  recentList.innerHTML = allFinished.length ? recent.map(s => sessionRow(s)).join('')
     : `<div class="tiny muted center" style="padding:8px">Noch keine abgeschlossenen Trainings.</div>`;
   $$('[data-session]', recentList).forEach(n => n.onclick = () => navigate('/train/' + n.dataset.session));
+  if (allFinished.length > RECENT_COLLAPSED_COUNT) {
+    const moreBtn = el('button', {
+      class: 'btn ghost block', style: 'margin-top:2px',
+      onclick: () => { calRecentExpanded = !calRecentExpanded; drawCalendar(); },
+    }, calRecentExpanded ? '▲ Weniger anzeigen' : `▼ Mehr anzeigen (${allFinished.length - RECENT_COLLAPSED_COUNT})`);
+    appEl.append(moreBtn);
+  }
 }
 
 function sessionRow(s) {
@@ -1849,7 +1865,7 @@ function dayDetailModal(dateKey, evs) {
 let statsPeriod = 7; // 7 | 30 | null (Alle) - EIN Umschalter für Gesamt-Übersicht + Muskelgruppen-Sätze
 // Auf-/zugeklappt-Zustand der Statistik-Abschnitte - modulglobal, damit ein Klick auf
 // den Zeitraum-Umschalter (voller render()) den Zustand nicht zurücksetzt.
-let statsAccOpen = { overview: true, volume: false, exercises: true };
+let statsAccOpen = { overview: true, topExercises: true, volume: false, exercises: true };
 route('/stats', () => {
   setChrome({ title: 'Statistik', back: false });
   const locs = DB.locations();
@@ -1898,8 +1914,11 @@ route('/stats', () => {
       <div class="stat-tile"><div class="v">${periodCount}</div><div class="l">Einheiten (${statsPeriod ? statsPeriod + ' Tage' : 'alle'})</div></div>
     </div>
     <div class="chart-wrap"><div class="c-title"><span>Trainingsvolumen je Einheit (alle Übungen, letzte ${overallHist.length})</span></div>${overallChart}</div>
+  </details>`;
+
+  html += `<details class="stats-acc" data-acc="topExercises" ${statsAccOpen.topExercises ? 'open' : ''}><summary>Meisttrainierte Übungen</summary>
     <div class="card">
-      <div class="tiny muted" style="margin-bottom:6px">Meisttrainierte Übungen (${statsPeriod ? statsPeriod + ' Tage' : 'alle Zeit'})</div>
+      <div class="tiny muted" style="margin-bottom:6px">${statsPeriod ? statsPeriod + ' Tage' : 'Alle Zeit'}</div>
       ${topEx.length ? topEx.map(t => `<div class="list-row" data-ex="${t.exerciseId}">
           <div class="grow"><div class="r-title">${esc(t.name)}</div></div>
           <div class="tiny muted">${t.count}×</div></div>`).join('')
@@ -2093,15 +2112,18 @@ route('/settings', () => {
   const activeLoc = DB.getActiveLocation();
 
   appEl.innerHTML = `
-    <div class="section-title">Design</div>
+    <div class="section-title">Erscheinungsbild</div>
     <div class="card">
       <label class="field" style="margin:0"><span>Theme</span></label>
       <div class="theme-pick" id="s-theme-pick">
         ${THEMES.map(t => `<button type="button" data-theme="${t.id}" class="${t.id === s.theme ? 'sel' : ''}">${t.emoji} ${t.label}</button>`).join('')}
       </div>
       <label class="field" style="margin:14px 0 0"><span>Akzentfarbe</span></label>
-      <div class="color-pick" id="s-accent-pick">
-        ${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c}" class="${c === s.accentColor ? 'sel' : ''}"></button>`).join('')}
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px">
+        <div class="color-pick" id="s-accent-pick" style="margin:0">
+          ${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c}" class="${c === s.accentColor ? 'sel' : ''}"></button>`).join('')}
+        </div>
+        <input id="s-accent-custom" type="color" value="${esc(s.accentColor)}" title="Eigene Farbe wählen" class="color-input" />
       </div>
       <div class="row2" style="margin-top:14px">
         <label class="field"><span>Schriftgröße</span>
@@ -2110,14 +2132,25 @@ route('/settings', () => {
             <option value="medium" ${s.fontSize === 'medium' ? 'selected' : ''}>Mittel</option>
             <option value="large" ${s.fontSize === 'large' ? 'selected' : ''}>Groß</option>
           </select></label>
+        <label class="field"><span>Abstände</span>
+          <select id="s-density">
+            <option value="compact" ${s.density === 'compact' ? 'selected' : ''}>Kompakt</option>
+            <option value="normal" ${s.density === 'normal' ? 'selected' : ''}>Normal</option>
+            <option value="spacious" ${s.density === 'spacious' ? 'selected' : ''}>Geräumig</option>
+          </select></label>
+      </div>
+      <div class="row2" style="margin-top:8px">
+        <label class="field"><span>Eckenradius</span>
+          <select id="s-corner">
+            <option value="sharp" ${s.cornerStyle === 'sharp' ? 'selected' : ''}>Eckig</option>
+            <option value="normal" ${s.cornerStyle === 'normal' ? 'selected' : ''}>Normal</option>
+            <option value="round" ${s.cornerStyle === 'round' ? 'selected' : ''}>Rund</option>
+          </select></label>
         <label class="field" style="display:flex;align-items:flex-end;gap:8px;padding-bottom:9px">
           <input id="s-reduced" type="checkbox" ${s.reducedMotion ? 'checked' : ''} style="width:auto" />
           <span style="margin:0">Animationen reduzieren</span></label>
       </div>
-    </div>
-
-    <div class="section-title">Übungs-Labels</div>
-    <div class="card">
+      <hr class="sep" />
       <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
         <input id="s-tagcolors" type="checkbox" ${s.tagColors ? 'checked' : ''} style="width:auto" />
         <span style="margin:0">Farbige Muskel-/Geräte-Labels</span></label>
@@ -2128,9 +2161,9 @@ route('/settings', () => {
       <div class="color-pick" id="s-equipcolor-pick">${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c}" class="${c === s.equipColor ? 'sel' : ''}"></button>`).join('')}</div>
     </div>
 
-    <div class="section-title">Trainings-Standardwerte</div>
+    <div class="section-title">Training</div>
     <div class="card">
-      <p class="tiny muted" style="margin-top:0">Gelten für neu angelegte Übungen im Trainingstag und für während des Trainings hinzugefügte Übungen.</p>
+      <p class="tiny muted" style="margin-top:0">Standardwerte gelten für neu angelegte Übungen im Trainingstag und für während des Trainings hinzugefügte Übungen.</p>
       <div class="row3">
         <label class="field"><span>Standard-Sätze</span><input id="s-defsets" type="number" min="1" value="${s.defaultSets}" /></label>
         <label class="field"><span>Standard-Wdh.</span><input id="s-defreps" type="number" min="1" value="${s.defaultReps}" /></label>
@@ -2142,22 +2175,23 @@ route('/settings', () => {
       <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
         <input id="s-notif" type="checkbox" ${s.restNotifications ? 'checked' : ''} style="width:auto" />
         <span style="margin:0">Browser-Benachrichtigung am Pausenende</span></label>
-    </div>
-
-    <div class="section-title">Verhalten</div>
-    <div class="card">
-      <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
+      <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
         <input id="s-diff" type="checkbox" ${s.askPlanDiff ? 'checked' : ''} style="width:auto" />
         <span style="margin:0">Nach dem Training nach Planänderungen fragen</span></label>
-      <label class="field" style="margin:14px 0 0"><span>Wochenstart im Kalender</span>
+    </div>
+
+    <div class="section-title">Kalender & Verhalten</div>
+    <div class="card">
+      <label class="field" style="margin:0"><span>Wochenstart im Kalender</span>
         <select id="s-weekstart">
           <option value="mon" ${s.weekStart === 'mon' ? 'selected' : ''}>Montag</option>
           <option value="sun" ${s.weekStart === 'sun' ? 'selected' : ''}>Sonntag</option>
         </select></label>
     </div>
 
-    <div class="section-title">Daten & Backup</div>
+    <div class="section-title">Daten & Sicherung</div>
     <div class="card">
+      <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Backup</div>
       <p class="tiny muted" style="margin-top:0">Alle Daten liegen <b>lokal auf diesem Gerät</b> (im Browser). Es gibt keinen Server. Erstelle regelmäßig ein Backup!</p>
       <div class="tiny muted">${stats.loc} Orte · ${stats.plans} Pläne · ${stats.days} Trainingstage · ${stats.ex} Übungen · ${stats.ses} Einheiten</div>
       <label class="field" style="margin:12px 0 0"><span>Backup-Erinnerung</span>
@@ -2173,18 +2207,16 @@ route('/settings', () => {
         <button class="btn" id="impBtn">⬆ Importieren</button>
       </div>
       <input type="file" id="impFile" accept="application/json,.json" hidden />
-    </div>
 
-    <div class="section-title">Beispieldaten</div>
-    <div class="card">
+      <hr class="sep" />
+      <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Beispieldaten</div>
       <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
         <input id="s-demo" type="checkbox" ${s.demoDataEnabled ? 'checked' : ''} style="width:auto" />
         <span style="margin:0">Beispieldaten (ca. 2 Monate Testtrainings)</span></label>
       <p class="tiny muted" style="margin:8px 0 0">Erzeugt bzw. entfernt plausible Testeinheiten für <b>${activeLoc ? esc(activeLoc.emoji) + ' ' + esc(activeLoc.name) : 'den aktiven Ort'}</b>, um Statistik &amp; Kalender auszuprobieren. Braucht mindestens einen Trainingstag mit Übungen an diesem Ort.</p>
-    </div>
 
-    <div class="section-title">Papierkorb</div>
-    <div class="card">
+      <hr class="sep" />
+      <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Papierkorb</div>
       <p class="tiny muted" style="margin-top:0">Gelöschte Übungen und Trainings bleiben hier, bis du sie wiederherstellst oder endgültig entfernst.</p>
       <div class="tiny muted">${trashCount} Einträge im Papierkorb</div>
       <button class="btn ghost block" id="openTrashBtn" style="margin-top:10px">Papierkorb öffnen</button>
@@ -2206,8 +2238,15 @@ route('/settings', () => {
   $$('#s-accent-pick button', appEl).forEach(b => b.onclick = () => {
     s.accentColor = b.dataset.c; DB.save(); applyDisplaySettings();
     $$('#s-accent-pick button', appEl).forEach(x => x.classList.remove('sel')); b.classList.add('sel');
+    $('#s-accent-custom', appEl).value = b.dataset.c;
   });
+  $('#s-accent-custom', appEl).oninput = e => {
+    s.accentColor = e.target.value; DB.save(); applyDisplaySettings();
+    $$('#s-accent-pick button', appEl).forEach(x => x.classList.remove('sel'));
+  };
   $('#s-fontsize', appEl).onchange = e => { s.fontSize = e.target.value; DB.save(); applyDisplaySettings(); };
+  $('#s-density', appEl).onchange = e => { s.density = e.target.value; DB.save(); applyDisplaySettings(); };
+  $('#s-corner', appEl).onchange = e => { s.cornerStyle = e.target.value; DB.save(); applyDisplaySettings(); };
   $('#s-reduced', appEl).onchange = e => { s.reducedMotion = e.target.checked; DB.save(); applyDisplaySettings(); };
   $('#s-tagcolors', appEl).onchange = e => { s.tagColors = e.target.checked; DB.save(); };
   $$('#s-musclecolor-pick button', appEl).forEach(b => b.onclick = () => {
