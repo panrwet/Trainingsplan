@@ -327,6 +327,13 @@ route('/plans', () => {
 
   html += `<div class="section-title">Pläne · ${esc(active.emoji)} ${esc(active.name)}</div>`;
 
+  // Dauerhaft verfügbar (nicht nur direkt nach dem Anlegen eines Ortes): Plan-Struktur
+  // von einem anderen, bereits bestehenden Ort übernehmen - egal wann dessen Pläne entstanden sind.
+  const otherLocsHavePlans = DB.locations().some(l => l.id !== active.id && DB.plansByLocation(l.id).length);
+  if (otherLocsHavePlans) {
+    html += `<button class="btn ghost block" id="importPlanBtn" style="margin-bottom:12px">📥 Plan von anderem Ort übernehmen</button>`;
+  }
+
   if (!plans.length) {
     html += `<div class="empty"><div class="big">📋</div><div>Noch keine Pläne an diesem Ort.</div>
       <div class="tiny" style="margin:8px 0 0">Tippe unten auf „＋".</div></div>`;
@@ -358,6 +365,8 @@ route('/plans', () => {
   $$('[data-goto]', appEl).forEach(n => n.onclick = () => navigate(n.dataset.goto));
   $$('[data-edit-plan]', appEl).forEach(b => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); navigate('/plan/' + b.dataset.editPlan); });
   $$('[data-start]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); startTraining(n.dataset.start); });
+  const importPlanBtn = $('#importPlanBtn', appEl);
+  if (importPlanBtn) importPlanBtn.onclick = () => offerPlanImportModal(active.id, { closeLabel: 'Schließen' });
   appEl.append(el('button', { class: 'fab', onclick: () => editPlanModal(null, active.id) }, '+'));
 });
 
@@ -400,7 +409,7 @@ function editLocationModal(id) {
 // Nach dem Anlegen eines neuen Orts anbieten, einen bestehenden Plan von
 // einem anderen Ort zu übernehmen (nur die Struktur - Übungen, Sätze/Wdh./
 // Pause -, keine Gewichts-/Wiederholungsdaten, die sind ja ortsabhängig).
-function offerPlanImportModal(newLocationId) {
+function offerPlanImportModal(newLocationId, { closeLabel = 'Ohne Plan starten' } = {}) {
   const otherLocs = DB.locations().filter(l => l.id !== newLocationId);
   const rows = [];
   otherLocs.forEach(loc => {
@@ -414,7 +423,7 @@ function offerPlanImportModal(newLocationId) {
         <div class="grow"><div class="r-title">${esc(r.plan.name)}</div>
           <div class="r-sub">von ${esc(r.loc.emoji)} ${esc(r.loc.name)}</div></div>
         <span class="arrow">＋</span></div>`).join('') || '<div class="tiny muted center" style="padding:10px">Keine Pläne vorhanden.</div>'}</div>`,
-    footer: `<button class="btn ghost" data-x>Ohne Plan starten</button>`,
+    footer: `<button class="btn ghost" data-x>${esc(closeLabel)}</button>`,
     onMount: (m, close) => {
       $('[data-x]', m).onclick = close;
       $$('[data-import-plan]', m).forEach(row => row.onclick = () => {
@@ -1124,7 +1133,10 @@ function renderTrain(container, id) {
   $('#addEx', container).onclick = () => pickExerciseModal(exId => {
     const ex = DB.getExercise(exId);
     const s2 = DB.getSession(id);
-    s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: 10, targetSets: 3, restSec: DB.db().settings.defaultRestSec, sets: [{ weight: '', reps: '', done: false }] });
+    const cfg = DB.db().settings;
+    const sets = [];
+    for (let i = 0; i < cfg.defaultSets; i++) sets.push({ weight: '', reps: '', done: false });
+    s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: cfg.defaultReps, targetSets: cfg.defaultSets, restSec: cfg.defaultRestSec, groupId: null, sets });
     DB.save(); renderTrain(container, id);
   });
 
@@ -1155,6 +1167,10 @@ function planDiffModal(sessionId, diffs) {
       else if (d.type === 'setsChanged') label = `🔢 Sätze bei <b>${esc(d.name)}</b>: ${d.oldVal} → ${d.newVal}`;
       else if (d.type === 'exerciseAdded') label = `➕ <b>${esc(d.name)}</b> zum Plan hinzufügen`;
       else if (d.type === 'exerciseRemoved') label = `➖ <b>${esc(d.name)}</b> aus dem Plan entfernen`;
+      else if (d.type === 'orderChanged') label = `🔀 Reihenfolge der Übungen anpassen: ${d.names.map(n => esc(n)).join(' → ')}`;
+      else if (d.type === 'groupingChanged') label = d.groupNames.length
+        ? `🔗 Zirkel-Gruppierung anpassen: ${d.groupNames.map(g => g.map(esc).join(' + ')).join(', ')}`
+        : `🔗 Zirkel-Gruppierung(en) auflösen`;
       return `<label class="diff-row"><input type="checkbox" data-diff="${i}" checked /><span>${label}</span></label>`;
     }).join('');
     const close = openModal({
@@ -1272,10 +1288,13 @@ function renderExerciseBlock(s, id, container, ei) {
     onNote: () => editExerciseNoteModal(entry.exerciseId, s.locationId, () => renderEntries(container, id)),
     onReplace: () => pickExerciseModal(exId => {
       const newEx = DB.getExercise(exId);
+      // Ziel-Satzanzahl beibehalten (nicht auf 1 zurücksetzen) - nur die eingetragenen
+      // Gewichte/Wdh. sind bei einer anderen Übung ohnehin nicht mehr vergleichbar.
+      const setCount = entry.sets.length || DB.db().settings.defaultSets;
       entry.exerciseId = exId;
       entry.name = newEx ? newEx.name : 'Übung';
       entry.unit = newEx?.unit || 'kg';
-      entry.sets = [{ weight: '', reps: '', done: false }];
+      entry.sets = Array.from({ length: setCount }, () => ({ weight: '', reps: '', done: false }));
       DB.save(); renderEntries(container, id);
     }),
     onMoveUp: () => {
@@ -1286,6 +1305,17 @@ function renderExerciseBlock(s, id, container, ei) {
     onMoveDown: () => {
       if (ei >= s.entries.length - 1) return;
       [s.entries[ei], s.entries[ei + 1]] = [s.entries[ei + 1], s.entries[ei]];
+      DB.save(); renderEntries(container, id);
+    },
+    onLinkNext: () => {
+      const next = s.entries[ei + 1]; if (!next) return;
+      const gid = entry.groupId || DB.uid('grp');
+      entry.groupId = gid; next.groupId = gid;
+      DB.save(); renderEntries(container, id);
+    },
+    onUngroupZirkel: () => {
+      const gid = entry.groupId; if (!gid) return;
+      s.entries.forEach(e => { if (e.groupId === gid) e.groupId = null; });
       DB.save(); renderEntries(container, id);
     },
     onRemoveExercise: async () => {
@@ -1309,6 +1339,8 @@ function exerciseMenuModal(entry, hasNote, isFirst, isLast, actions) {
       <button class="sheet-btn" data-act="replace">🔄 Übung ersetzen</button>
       ${!isFirst ? '<button class="sheet-btn" data-act="up">↑ Nach oben verschieben</button>' : ''}
       ${!isLast ? '<button class="sheet-btn" data-act="down">↓ Nach unten verschieben</button>' : ''}
+      ${!isLast ? `<button class="sheet-btn" data-act="linknext">🔗 ${entry.groupId ? 'Nächste Übung in Zirkel aufnehmen' : 'Mit nächster Übung zum Zirkel verbinden'}</button>` : ''}
+      ${entry.groupId ? '<button class="sheet-btn" data-act="ungroupz">✂️ Zirkel auflösen</button>' : ''}
       <button class="sheet-btn" data-act="note">📝 ${hasNote ? 'Notiz bearbeiten' : 'Notiz hinzufügen'}</button>
       <button class="sheet-btn danger" data-act="remove">🗑️ Übung aus Training entfernen</button>
     </div>`,
@@ -1321,6 +1353,8 @@ function exerciseMenuModal(entry, hasNote, isFirst, isLast, actions) {
       $('[data-act="replace"]', m).onclick = () => { close(); actions.onReplace(); };
       const up = $('[data-act="up"]', m); if (up) up.onclick = () => { close(); actions.onMoveUp(); };
       const down = $('[data-act="down"]', m); if (down) down.onclick = () => { close(); actions.onMoveDown(); };
+      const linknext = $('[data-act="linknext"]', m); if (linknext) linknext.onclick = () => { close(); actions.onLinkNext(); };
+      const ungroupz = $('[data-act="ungroupz"]', m); if (ungroupz) ungroupz.onclick = () => { close(); actions.onUngroupZirkel(); };
       $('[data-act="note"]', m).onclick = () => { close(); actions.onNote(); };
       $('[data-act="remove"]', m).onclick = () => { close(); actions.onRemoveExercise(); };
     },

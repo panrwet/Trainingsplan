@@ -314,12 +314,14 @@ export function reorderDayExercises(dayId, orderedItemIds) {
 // (in der ursprünglichen relativen Reihenfolge der Auswahl) - ein Zirkel
 // muss lückenlos hintereinander stehen, sonst ergibt "keine Pause dazwischen"
 // keinen Sinn.
-export function groupExercises(dayId, itemIds) {
-  const day = getDay(dayId); if (!day || itemIds.length < 2) return;
+// Kernlogik ohne save() (wird auch beim Übernehmen von Trainings-Diffs wiederverwendet).
+function regroupContiguous(day, itemIds) {
+  if (itemIds.length < 2) return null;
   const groupId = uid('grp');
   const idSet = new Set(itemIds);
   // Reihenfolge der Auswahl beibehalten (nicht die alte Listenreihenfolge)
   const selected = itemIds.map(id => day.exercises.find(x => x.id === id)).filter(Boolean);
+  if (selected.length < 2) return null;
   selected.forEach(item => { item.groupId = groupId; });
   // Block an die Position des ersten ausgewählten Elements verschieben,
   // alle anderen Elemente behalten ihre relative Reihenfolge.
@@ -328,7 +330,12 @@ export function groupExercises(dayId, itemIds) {
   const insertAtInOthers = day.exercises.slice(0, insertAt).filter(x => !idSet.has(x.id)).length;
   others.splice(insertAtInOthers, 0, ...selected);
   day.exercises = others;
-  save();
+  return groupId;
+}
+export function groupExercises(dayId, itemIds) {
+  const day = getDay(dayId); if (!day) return;
+  const groupId = regroupContiguous(day, itemIds);
+  if (groupId) save();
   return groupId;
 }
 export function ungroupExercises(dayId, groupId) {
@@ -379,7 +386,7 @@ export function startSession(dayId) {
     entries,
     // Schnappschuss des Plans zum Trainingsstart -> Basis für den Diff beim Beenden
     // (Trainingstag könnte sich zwischenzeitlich ändern oder gelöscht werden).
-    planSnapshot: day.exercises.map(item => ({ exerciseId: item.exerciseId, sets: item.sets, reps: item.reps, restSec: item.restSec })),
+    planSnapshot: day.exercises.map(item => ({ exerciseId: item.exerciseId, sets: item.sets, reps: item.reps, restSec: item.restSec, groupId: item.groupId || null })),
   };
   db().sessions.push(s); save(); return s;
 }
@@ -414,32 +421,36 @@ export function emptyTrash() {
 // ---------- Anpassungen während des Trainings zurück in den Plan übernehmen ----------
 // Vergleicht den aktuellen Stand der Einheit mit dem Schnappschuss bei Trainingsstart
 // und liefert einzeln auswählbare Änderungen (Pause/Sätze pro Übung, hinzugefügte/
-// entfernte Übungen). Ohne planSnapshot oder gelöschten Trainingstag: keine Diffs.
+// entfernte Übungen, Reihenfolge). Ohne planSnapshot oder gelöschten Trainingstag: keine Diffs.
+// Wichtig: "hinzugefügt"/"Sätze geändert" hängen NICHT davon ab, ob im Training
+// tatsächlich ein Satz abgehakt wurde - das Hinzufügen/Entfernen einer Übung oder
+// eines Satzes über das "⋮"-Menü ist bereits eine explizite Handlung des Nutzers.
 export function computeSessionPlanDiff(sessionId) {
   const s = getSession(sessionId);
   if (!s || !s.planSnapshot) return [];
   const day = getDay(s.dayId);
   if (!day) return [];
+  const settings = db().settings;
   const snapMap = new Map(s.planSnapshot.map(x => [x.exerciseId, x]));
   const entryMap = new Map(s.entries.map(x => [x.exerciseId, x]));
   const diffs = [];
   for (const entry of s.entries) {
     const snap = snapMap.get(entry.exerciseId);
-    const doneCount = (entry.sets || []).filter(isWorkingDone).length;
     if (!snap) {
-      if (doneCount > 0) {
-        diffs.push({
-          type: 'exerciseAdded', exerciseId: entry.exerciseId, name: entry.name,
-          sets: Math.max(doneCount, 1), reps: entry.targetReps || num(entry.sets[0]?.reps) || 10, restSec: entry.restSec,
-        });
-      }
+      diffs.push({
+        type: 'exerciseAdded', exerciseId: entry.exerciseId, name: entry.name,
+        sets: (entry.sets || []).length || settings.defaultSets,
+        reps: entry.targetReps || settings.defaultReps,
+        restSec: entry.restSec ?? settings.defaultRestSec,
+      });
       continue;
     }
     if (entry.restSec !== snap.restSec) {
       diffs.push({ type: 'restChanged', exerciseId: entry.exerciseId, name: entry.name, oldVal: snap.restSec, newVal: entry.restSec });
     }
-    if (doneCount > 0 && doneCount !== snap.sets) {
-      diffs.push({ type: 'setsChanged', exerciseId: entry.exerciseId, name: entry.name, oldVal: snap.sets, newVal: doneCount });
+    const setCount = (entry.sets || []).length;
+    if (setCount !== snap.sets) {
+      diffs.push({ type: 'setsChanged', exerciseId: entry.exerciseId, name: entry.name, oldVal: snap.sets, newVal: setCount });
     }
   }
   for (const snap of s.planSnapshot) {
@@ -448,17 +459,66 @@ export function computeSessionPlanDiff(sessionId) {
       diffs.push({ type: 'exerciseRemoved', exerciseId: snap.exerciseId, name: ex ? ex.name : '(Übung)' });
     }
   }
+  // Reihenfolge: Vergleich der relativen Reihenfolge der Übungen, die in Plan UND
+  // Training vorkommen (neu hinzugefügte/entfernte Übungen zählen dafür nicht extra,
+  // die werden über die obigen Diffs abgedeckt).
+  const commonInSnapOrder = s.planSnapshot.map(x => x.exerciseId).filter(id => entryMap.has(id));
+  const commonSet = new Set(commonInSnapOrder);
+  const commonInEntryOrder = s.entries.map(e => e.exerciseId).filter(id => commonSet.has(id));
+  if (commonInSnapOrder.length > 1 && commonInSnapOrder.join('|') !== commonInEntryOrder.join('|')) {
+    diffs.push({
+      type: 'orderChanged',
+      orderExerciseIds: s.entries.map(e => e.exerciseId),
+      names: s.entries.map(e => e.name),
+    });
+  }
+  // Zirkel/Supersätze: Gruppierungs-Struktur (welche Übungen ohne Pause zusammengehören)
+  // zwischen Plan-Schnappschuss und aktuellem Trainingsstand vergleichen. Reine
+  // Gruppen-Zusammensetzung zählt, nicht die konkrete groupId (die ist bei einer
+  // neu erstellten Gruppe im Training ohnehin immer neu). Erkennung nur anhand der
+  // Übungen, die es in BEIDEN Ständen gibt (fairer Vergleich) - zum Übernehmen wird
+  // aber die volle aktuelle Gruppierung gespeichert, damit z.B. eine neu hinzugefügte
+  // Übung, die direkt mit in den Zirkel aufgenommen wurde, nicht verloren geht.
+  const groupsOf = (list, eligible) => {
+    const map = new Map();
+    list.forEach(x => {
+      if (!eligible.has(x.exerciseId) || !x.groupId) return;
+      if (!map.has(x.groupId)) map.set(x.groupId, []);
+      map.get(x.groupId).push(x.exerciseId);
+    });
+    return Array.from(map.values()).filter(g => g.length > 1);
+  };
+  const normalize = groups => groups.map(g => g.slice().sort().join(',')).sort();
+  const snapGroupsForCompare = groupsOf(s.planSnapshot, commonSet);
+  const entryGroupsForCompare = groupsOf(s.entries, commonSet);
+  if (JSON.stringify(normalize(snapGroupsForCompare)) !== JSON.stringify(normalize(entryGroupsForCompare))) {
+    const allEntryIds = new Set(s.entries.map(e => e.exerciseId));
+    const entryGroupsForApply = groupsOf(s.entries, allEntryIds);
+    diffs.push({
+      type: 'groupingChanged',
+      groups: entryGroupsForApply,
+      // Übungen, die VORHER gruppiert waren (auch wenn sie jetzt in keiner Gruppe
+      // mehr sind) - werden beim Übernehmen mit gelöst, sonst bliebe eine im
+      // Training komplett aufgelöste Gruppe im Plan unverändert bestehen.
+      previousGroupedIds: snapGroupsForCompare.flat(),
+      groupNames: entryGroupsForApply.map(g => g.map(exId => (entryMap.get(exId) || {}).name || '?')),
+    });
+  }
   return diffs;
 }
 
 // Wendet ausgewählte Diffs (aus computeSessionPlanDiff) auf den zugehörigen
 // Trainingstag an (Plan-Vorlage). Nicht ausgewählte Änderungen gelten nur für
-// diese eine Einheit.
+// diese eine Einheit. Reihenfolge unabhängig von der Auswahl-Reihenfolge der
+// Checkboxen verarbeiten: erst hinzufügen/entfernen/anpassen, Reihenfolge zuletzt
+// (sonst würde eine neu hinzugefügte Übung beim Sortieren evtl. noch fehlen).
+const DIFF_PRIORITY = { exerciseRemoved: 0, exerciseAdded: 1, restChanged: 2, setsChanged: 2, orderChanged: 3, groupingChanged: 4 };
 export function applyPlanDiffs(sessionId, changes) {
   const s = getSession(sessionId); if (!s) return { applied: 0 };
   const day = getDay(s.dayId); if (!day) return { applied: 0 };
   let applied = 0;
-  changes.forEach(ch => {
+  const ordered = changes.slice().sort((a, b) => (DIFF_PRIORITY[a.type] ?? 9) - (DIFF_PRIORITY[b.type] ?? 9));
+  ordered.forEach(ch => {
     if (ch.type === 'restChanged' || ch.type === 'setsChanged') {
       const item = day.exercises.find(x => x.exerciseId === ch.exerciseId);
       if (!item) return;
@@ -474,6 +534,27 @@ export function applyPlanDiffs(sessionId, changes) {
       const before = day.exercises.length;
       day.exercises = day.exercises.filter(x => x.exerciseId !== ch.exerciseId);
       if (day.exercises.length !== before) applied++;
+    } else if (ch.type === 'orderChanged') {
+      const orderIds = ch.orderExerciseIds;
+      day.exercises.sort((a, b) => {
+        const ia = orderIds.indexOf(a.exerciseId), ib = orderIds.indexOf(b.exerciseId);
+        if (ia === -1 && ib === -1) return 0;
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
+      });
+      applied++;
+    } else if (ch.type === 'groupingChanged') {
+      // Erst alle betroffenen Übungen aus ihrer bisherigen Gruppe lösen (auch die,
+      // die jetzt in gar keiner Gruppe mehr sind), dann die neuen Gruppen (aus dem
+      // Training) als zusammenhängende Blöcke neu bilden.
+      const touchedExIds = new Set([...ch.groups.flat(), ...(ch.previousGroupedIds || [])]);
+      day.exercises.forEach(it => { if (touchedExIds.has(it.exerciseId)) it.groupId = null; });
+      ch.groups.forEach(exIds => {
+        const itemIds = exIds.map(exId => day.exercises.find(it => it.exerciseId === exId)?.id).filter(Boolean);
+        if (itemIds.length >= 2) regroupContiguous(day, itemIds);
+      });
+      applied++;
     }
   });
   save();
