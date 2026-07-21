@@ -537,6 +537,34 @@ function moveInArray(arr, id, dir) {
   [arr[i], arr[j]] = [arr[j], arr[i]];
 }
 
+// Verschiebt das Element an Index `i` in einer Liste (Trainingstag-Übungen ODER
+// Trainings-Entries) um eine Position nach oben/unten (dir=-1/+1) - eine zusammen-
+// hängende Zirkel-Gruppe (gleiche groupId) wird dabei als EIN Block bewegt, sonst
+// würde eine Gruppe auseinandergerissen (Superset-Rendering/Pausenlogik setzen
+// lückenlos zusammenhängende groupId-Läufe voraus).
+function reorderStep(list, i, dir) {
+  const gid = list[i].groupId;
+  let start = i, end = i;
+  if (gid) {
+    while (start > 0 && list[start - 1].groupId === gid) start--;
+    while (end < list.length - 1 && list[end + 1].groupId === gid) end++;
+  }
+  if (dir < 0 && start > 0) {
+    let ns = start - 1;
+    const ngid = list[ns].groupId;
+    if (ngid) { while (ns > 0 && list[ns - 1].groupId === ngid) ns--; }
+    const block = list.splice(start, end - start + 1);
+    list.splice(ns, 0, ...block);
+  } else if (dir > 0 && end < list.length - 1) {
+    let ne = end + 1;
+    const ngid = list[ne].groupId;
+    if (ngid) { while (ne < list.length - 1 && list[ne + 1].groupId === ngid) ne++; }
+    const blockLen = end - start + 1;
+    const block = list.splice(start, blockLen);
+    list.splice(ne - blockLen + 1, 0, ...block);
+  }
+}
+
 function editDayModal(id, planId) {
   const day = id ? DB.getDay(id) : { name: '', emoji: '💪', color: COLORS[1], planId };
   openModal({
@@ -601,12 +629,12 @@ route('/day/:id', ({ id }) => {
       html += `<p class="tiny muted" style="margin-top:0">Wähle 2 oder mehr Übungen, die als Zirkel ohne Pause dazwischen trainiert werden sollen.</p>`;
       day.exercises.forEach(item => { html += dayExerciseCardHTML(item, true, selected); });
     } else if (reorderMode) {
-      html += `<p class="tiny muted" style="margin-top:0">Mit ▲/▼ die Reihenfolge der Übungen ändern.</p>`;
+      html += `<p class="tiny muted" style="margin-top:0">Mit ▲/▼ die Reihenfolge der Übungen ändern. Zirkel-Übungen bewegen sich als Block.</p>`;
       day.exercises.forEach((item, idx) => {
         const ex = DB.getExercise(item.exerciseId);
         html += `<div class="card">
           <div style="display:flex;align-items:center;gap:8px">
-            <div class="grow"><b>${esc(ex ? ex.name : '(gelöscht)')}</b></div>
+            <div class="grow"><b>${item.groupId ? '🔗 ' : ''}${esc(ex ? ex.name : '(gelöscht)')}</b></div>
             <span class="mv" data-up="${item.id}" style="padding:4px 8px;color:${idx === 0 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${idx === 0 ? 'none' : 'auto'}">▲</span>
             <span class="mv" data-down="${item.id}" style="padding:4px 8px;color:${idx === day.exercises.length - 1 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${idx === day.exercises.length - 1 ? 'none' : 'auto'}">▼</span>
           </div>
@@ -654,9 +682,16 @@ route('/day/:id', ({ id }) => {
     }
 
     if (reorderMode) {
-      const ids = day.exercises.map(x => x.id);
-      $$('[data-up]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.up, -1); DB.reorderDayExercises(id, ids); draw(); });
-      $$('[data-down]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.down, +1); DB.reorderDayExercises(id, ids); draw(); });
+      $$('[data-up]', appEl).forEach(n => n.onclick = () => {
+        const idx = day.exercises.findIndex(x => x.id === n.dataset.up);
+        if (idx >= 0) reorderStep(day.exercises, idx, -1);
+        DB.save(); draw();
+      });
+      $$('[data-down]', appEl).forEach(n => n.onclick = () => {
+        const idx = day.exercises.findIndex(x => x.id === n.dataset.down);
+        if (idx >= 0) reorderStep(day.exercises, idx, 1);
+        DB.save(); draw();
+      });
       const bar = el('div', { class: 'select-bar' });
       bar.innerHTML = `<button class="btn primary block" id="doneReorderBtn">Fertig</button>`;
       appEl.append(bar);
@@ -670,9 +705,6 @@ route('/day/:id', ({ id }) => {
     if (startGroupBtn) startGroupBtn.onclick = () => { selectMode = true; selected.clear(); draw(); };
     const startReorderBtn = $('#startReorderBtn', appEl);
     if (startReorderBtn) startReorderBtn.onclick = () => { reorderMode = true; draw(); };
-    const ids = day.exercises.map(x => x.id);
-    $$('[data-up]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.up, -1); DB.reorderDayExercises(id, ids); render(); });
-    $$('[data-down]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.down, +1); DB.reorderDayExercises(id, ids); render(); });
     $$('[data-edit]', appEl).forEach(n => n.onclick = () => editDayExerciseModal(id, n.dataset.edit));
     $$('[data-rm]', appEl).forEach(n => n.onclick = async () => {
       if (await confirmDialog('Übung aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) { DB.removeDayExercise(id, n.dataset.rm); render(); }
@@ -704,8 +736,6 @@ function dayExerciseCardHTML(item, selectMode, selected) {
       <div class="grow" style="flex:1"><b>${esc(ex ? ex.name : '(gelöscht)')}</b>
         ${ex ? tagBadgesHTML(ex) : ''}
         <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh · Pause ${item.restSec}s</div></div>
-      <span class="mv" data-up="${item.id}" style="padding:4px 6px;color:var(--text-dim2)">▲</span>
-      <span class="mv" data-down="${item.id}" style="padding:4px 6px;color:var(--text-dim2)">▼</span>
       <button class="btn ghost sm" data-edit="${item.id}">✏️</button>
       <button class="btn ghost sm" data-rm="${item.id}">🗑️</button>
     </div>
@@ -1104,11 +1134,17 @@ function manageMuscleGroupsModal() {
 // ============================================================
 let restTimer = null;
 
+// Zirkel-/Reihenfolge-Modus im laufenden Training (analog zu /day/:id) - modulglobal
+// wie calState/libFilter, da renderTrain/renderEntries als eigenständige Funktionen
+// (nicht als Route-Closure) von mehreren Stellen aus erneut aufgerufen werden.
+let trainMode = null; // null | 'select' | 'reorder'
+const trainSelected = new Set(); // Entry-Indizes während der Zirkel-Auswahl
+
 route('/train/:id', ({ id }) => {
   const s = DB.getSession(id);
   if (!s) return navigate('/plans');
-  const finished = !!s.finishedAt;
   setChrome({ title: s.dayName || 'Training', back: true, actions: [actionBtn('🗑️', () => discardSession(id))] });
+  trainMode = null; trainSelected.clear();
 
   const container = el('div');
   renderTrain(container, id);
@@ -1130,28 +1166,31 @@ function renderTrain(container, id) {
           <input id="t-date" type="date" value="${esc(s.date)}" style="margin-top:6px;width:auto" />
         </div>
       </div>
-      <div class="row2" style="margin-top:10px">
-        <label class="field" style="margin:0"><span>Kürzel/Emoji (Kalender)</span><input id="t-emoji" maxlength="4" value="${esc(s.emoji || '')}" /></label>
-        <div>
-          <label class="field" style="margin:0"><span>Farbe</span></label>
-          <div class="color-pick" id="t-color">${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c};width:24px;height:24px" class="${c === s.color ? 'sel' : ''}"></button>`).join('')}</div>
-        </div>
-      </div>
+      <label class="field" style="margin:10px 0 0"><span>Farbe</span></label>
+      <div class="color-pick" id="t-color">${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c};width:24px;height:24px" class="${c === s.color ? 'sel' : ''}"></button>`).join('')}</div>
       <label class="field" style="margin:12px 0 0"><span>Notiz</span><textarea id="t-note" placeholder="z.B. gut drauf, Schulter zwickt …">${esc(s.note || '')}</textarea></label>
     </div>
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Übungen</span>
+      ${trainMode === 'select' ? `<span class="tiny muted">${trainSelected.size} ausgewählt</span>`
+        : trainMode === 'reorder' ? `<span class="tiny muted">Reihenfolge anpassen</span>`
+        : (s.entries.length > 1 ? `<div style="display:flex;gap:6px">
+            <button class="btn ghost sm" id="trainGroupBtn">🔗 Zirkel erstellen</button>
+            <button class="btn ghost sm" id="trainReorderBtn">↕ Reihenfolge</button>
+          </div>` : '')}
+    </div>
     <div id="entries"></div>
-    <button class="btn block" id="addEx" style="margin-top:6px">+ Übung hinzufügen</button>
+    ${trainMode ? '' : `<button class="btn block" id="addEx" style="margin-top:6px">+ Übung hinzufügen</button>
     <hr class="sep" />
     ${finished
       ? `<button class="btn primary block" id="reopenBtn">Als „laufend" markieren</button>`
-      : `<button class="btn good block" id="finishBtn">✓ Training beenden</button>`}
-    <div style="height:20px"></div>
+      : `<button class="btn good block" id="finishBtn">✓ Training beenden</button>`}`}
+    <div style="height:${trainMode ? '70px' : '20px'}"></div>
   `;
   container.innerHTML = html;
 
   // Kopf-Felder
   $('#t-date', container).onchange = e => DB.updateSession(id, { date: e.target.value });
-  $('#t-emoji', container).oninput = e => { DB.updateSession(id, { emoji: e.target.value.trim() }); $('#t-chip', container).textContent = e.target.value.trim() || '💪'; };
   $('#t-note', container).oninput = e => DB.updateSession(id, { note: e.target.value });
   $$('#t-color button', container).forEach(b => b.onclick = () => {
     DB.updateSession(id, { color: b.dataset.c });
@@ -1161,7 +1200,13 @@ function renderTrain(container, id) {
 
   renderEntries(container, id);
 
-  $('#addEx', container).onclick = () => pickExerciseModal(exId => {
+  const trainGroupBtn = $('#trainGroupBtn', container);
+  if (trainGroupBtn) trainGroupBtn.onclick = () => { trainMode = 'select'; trainSelected.clear(); renderTrain(container, id); };
+  const trainReorderBtn = $('#trainReorderBtn', container);
+  if (trainReorderBtn) trainReorderBtn.onclick = () => { trainMode = 'reorder'; renderTrain(container, id); };
+
+  const addEx = $('#addEx', container);
+  if (addEx) addEx.onclick = () => pickExerciseModal(exId => {
     const ex = DB.getExercise(exId);
     const s2 = DB.getSession(id);
     const cfg = DB.db().settings;
@@ -1233,10 +1278,75 @@ function isLastInGroup(entries, i) {
   return !(next && next.groupId === gid);
 }
 
+function trainSelectCardHTML(entry, ei) {
+  const isSel = trainSelected.has(ei);
+  return `<div class="card tap select-card ${isSel ? 'sel' : ''}" data-tsel="${ei}">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="select-check ${isSel ? 'on' : ''}">${isSel ? '✓' : ''}</div>
+      <div class="grow"><b>${esc(entry.name)}</b></div>
+    </div>
+  </div>`;
+}
+function trainReorderCardHTML(entry, ei, total) {
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="grow"><b>${entry.groupId ? '🔗 ' : ''}${esc(entry.name)}</b></div>
+      <span class="mv" data-tup="${ei}" style="padding:4px 8px;color:${ei === 0 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${ei === 0 ? 'none' : 'auto'}">▲</span>
+      <span class="mv" data-tdown="${ei}" style="padding:4px 8px;color:${ei === total - 1 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${ei === total - 1 ? 'none' : 'auto'}">▼</span>
+    </div>
+  </div>`;
+}
+
 function renderEntries(container, id) {
   const s = DB.getSession(id);
   const wrap = $('#entries', container);
   wrap.innerHTML = '';
+  // Zirkel-/Reihenfolge-Leiste liegt außerhalb von #entries (fixe Bottom-Bar) - bei
+  // wiederholten renderEntries()-Aufrufen innerhalb desselben Modus (z.B. jeder
+  // ▲/▼-Klick im Reihenfolge-Modus) sonst mehrfach angehängt statt ersetzt.
+  $$('.select-bar', container).forEach(b => b.remove());
+
+  if (trainMode === 'select') {
+    s.entries.forEach((entry, ei) => { wrap.innerHTML += trainSelectCardHTML(entry, ei); });
+    $$('[data-tsel]', wrap).forEach(n => n.onclick = () => {
+      const idx = parseInt(n.dataset.tsel);
+      trainSelected.has(idx) ? trainSelected.delete(idx) : trainSelected.add(idx);
+      renderTrain(container, id);
+    });
+    const bar = el('div', { class: 'select-bar' });
+    bar.innerHTML = `<button class="btn ghost" id="cancelTrainGroupBtn">Abbrechen</button>
+      <button class="btn primary" id="confirmTrainGroupBtn" ${trainSelected.size < 2 ? 'disabled' : ''}>🔗 Gruppieren (${trainSelected.size})</button>`;
+    container.append(bar);
+    $('#cancelTrainGroupBtn', bar).onclick = () => { trainMode = null; trainSelected.clear(); renderTrain(container, id); };
+    $('#confirmTrainGroupBtn', bar).onclick = () => {
+      if (trainSelected.size < 2) return;
+      const gid = DB.uid('grp');
+      [...trainSelected].forEach(idx => { if (s.entries[idx]) s.entries[idx].groupId = gid; });
+      DB.save();
+      toast('Zirkel erstellt');
+      trainMode = null; trainSelected.clear();
+      renderTrain(container, id);
+    };
+    return;
+  }
+
+  if (trainMode === 'reorder') {
+    s.entries.forEach((entry, ei) => { wrap.innerHTML += trainReorderCardHTML(entry, ei, s.entries.length); });
+    $$('[data-tup]', wrap).forEach(n => n.onclick = () => {
+      reorderStep(s.entries, parseInt(n.dataset.tup), -1);
+      DB.save(); renderEntries(container, id);
+    });
+    $$('[data-tdown]', wrap).forEach(n => n.onclick = () => {
+      reorderStep(s.entries, parseInt(n.dataset.tdown), 1);
+      DB.save(); renderEntries(container, id);
+    });
+    const bar = el('div', { class: 'select-bar' });
+    bar.innerHTML = `<button class="btn primary block" id="doneTrainReorderBtn">Fertig</button>`;
+    container.append(bar);
+    $('#doneTrainReorderBtn', bar).onclick = () => { trainMode = null; renderTrain(container, id); };
+    return;
+  }
+
   let i = 0;
   while (i < s.entries.length) {
     const gid = s.entries[i].groupId;
@@ -1244,7 +1354,9 @@ function renderEntries(container, id) {
       let j = i;
       while (j < s.entries.length && s.entries[j].groupId === gid) j++;
       const groupWrap = el('div', { class: 'superset-wrap' });
-      groupWrap.append(el('div', { class: 'superset-label' }, '🔗 Zirkel – keine Pause zwischen den Übungen'));
+      const labelRow = el('div', { class: 'superset-label', style: 'display:flex;justify-content:space-between;align-items:center' });
+      labelRow.innerHTML = `<span>🔗 Zirkel – keine Pause zwischen den Übungen</span><button class="btn ghost sm" data-tungroup="${gid}">Auflösen</button>`;
+      groupWrap.append(labelRow);
       for (let k = i; k < j; k++) groupWrap.append(renderExerciseBlock(s, id, container, k));
       wrap.append(groupWrap);
       i = j;
@@ -1253,6 +1365,13 @@ function renderEntries(container, id) {
       i++;
     }
   }
+  $$('[data-tungroup]', wrap).forEach(n => n.onclick = async () => {
+    if (await confirmDialog('Zirkel auflösen?', { okText: 'Auflösen' })) {
+      const gid = n.dataset.tungroup;
+      s.entries.forEach(e => { if (e.groupId === gid) e.groupId = null; });
+      DB.save(); renderEntries(container, id);
+    }
+  });
 }
 
 function renderExerciseBlock(s, id, container, ei) {
@@ -1305,7 +1424,7 @@ function renderExerciseBlock(s, id, container, ei) {
     setsEl.append(row);
   });
 
-  $('[data-menu]', block).onclick = () => exerciseMenuModal(entry, !!noteRec, ei === 0, ei === s.entries.length - 1, {
+  $('[data-menu]', block).onclick = () => exerciseMenuModal(entry, !!noteRec, {
     onAddSet: () => {
       const prev = entry.sets[entry.sets.length - 1];
       entry.sets.push({ weight: prev ? prev.weight : '', reps: prev ? prev.reps : '', done: false });
@@ -1328,27 +1447,6 @@ function renderExerciseBlock(s, id, container, ei) {
       entry.sets = Array.from({ length: setCount }, () => ({ weight: '', reps: '', done: false }));
       DB.save(); renderEntries(container, id);
     }),
-    onMoveUp: () => {
-      if (ei <= 0) return;
-      [s.entries[ei - 1], s.entries[ei]] = [s.entries[ei], s.entries[ei - 1]];
-      DB.save(); renderEntries(container, id);
-    },
-    onMoveDown: () => {
-      if (ei >= s.entries.length - 1) return;
-      [s.entries[ei], s.entries[ei + 1]] = [s.entries[ei + 1], s.entries[ei]];
-      DB.save(); renderEntries(container, id);
-    },
-    onLinkNext: () => {
-      const next = s.entries[ei + 1]; if (!next) return;
-      const gid = entry.groupId || DB.uid('grp');
-      entry.groupId = gid; next.groupId = gid;
-      DB.save(); renderEntries(container, id);
-    },
-    onUngroupZirkel: () => {
-      const gid = entry.groupId; if (!gid) return;
-      s.entries.forEach(e => { if (e.groupId === gid) e.groupId = null; });
-      DB.save(); renderEntries(container, id);
-    },
     onRemoveExercise: async () => {
       if (await confirmDialog('Übung aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
         s.entries.splice(ei, 1); DB.save(); renderEntries(container, id);
@@ -1360,7 +1458,7 @@ function renderExerciseBlock(s, id, container, ei) {
 
 // Kompaktes Aktions-Menü für eine Übung im laufenden Training (ersetzt die
 // vorherigen Einzel-Buttons für Pause/Löschen -> schlankerer Übungskopf).
-function exerciseMenuModal(entry, hasNote, isFirst, isLast, actions) {
+function exerciseMenuModal(entry, hasNote, actions) {
   openModal({
     title: entry.name,
     body: `<div class="sheet">
@@ -1371,10 +1469,6 @@ function exerciseMenuModal(entry, hasNote, isFirst, isLast, actions) {
         <button class="split-half" data-act="addset" aria-label="Satz hinzufügen">＋</button>
       </div>
       <button class="sheet-btn" data-act="replace">🔄 Übung ersetzen</button>
-      ${!isFirst ? '<button class="sheet-btn" data-act="up">↑ Nach oben verschieben</button>' : ''}
-      ${!isLast ? '<button class="sheet-btn" data-act="down">↓ Nach unten verschieben</button>' : ''}
-      ${!isLast ? `<button class="sheet-btn" data-act="linknext">🔗 ${entry.groupId ? 'Nächste Übung in Zirkel aufnehmen' : 'Mit nächster Übung zum Zirkel verbinden'}</button>` : ''}
-      ${entry.groupId ? '<button class="sheet-btn" data-act="ungroupz">✂️ Zirkel auflösen</button>' : ''}
       <button class="sheet-btn" data-act="note">📝 ${hasNote ? 'Notiz bearbeiten' : 'Notiz hinzufügen'}</button>
       <button class="sheet-btn danger" data-act="remove">🗑️ Übung aus Training entfernen</button>
     </div>`,
@@ -1385,10 +1479,6 @@ function exerciseMenuModal(entry, hasNote, isFirst, isLast, actions) {
       $('[data-act="addset"]', m).onclick = () => { close(); actions.onAddSet(); };
       $('[data-act="rmset"]', m).onclick = () => { close(); actions.onRemoveSet(); };
       $('[data-act="replace"]', m).onclick = () => { close(); actions.onReplace(); };
-      const up = $('[data-act="up"]', m); if (up) up.onclick = () => { close(); actions.onMoveUp(); };
-      const down = $('[data-act="down"]', m); if (down) down.onclick = () => { close(); actions.onMoveDown(); };
-      const linknext = $('[data-act="linknext"]', m); if (linknext) linknext.onclick = () => { close(); actions.onLinkNext(); };
-      const ungroupz = $('[data-act="ungroupz"]', m); if (ungroupz) ungroupz.onclick = () => { close(); actions.onUngroupZirkel(); };
       $('[data-act="note"]', m).onclick = () => { close(); actions.onNote(); };
       $('[data-act="remove"]', m).onclick = () => { close(); actions.onRemoveExercise(); };
     },
