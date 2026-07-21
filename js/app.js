@@ -43,9 +43,6 @@ function parseISO(iso) { const [y, m, d] = String(iso).split('-').map(Number); r
 function fmtDate(iso) { const d = parseISO(iso); return `${WD[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`; }
 function fmtShort(iso) { const d = parseISO(iso); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.`; }
 function fmtWeight(n) { const v = Math.round(n * 100) / 100; return (Number.isInteger(v) ? v : v.toFixed(1)).toString(); }
-function setSummary(sets) {
-  return sets.filter(DB.hasData).map(s => `${fmtWeight(DB.num(s.weight))}×${DB.num(s.reps)}`).join(' · ');
-}
 
 // ---------- Symbol- / Farb-Picker ----------
 const EMOJI_SETS = {
@@ -258,8 +255,13 @@ function updateTabs(hash) {
 }
 window.addEventListener('hashchange', render);
 
+// Läuft für diesen Trainingstag schon eine unbeendete Einheit (z.B. nach App-Neustart
+// oder versehentlichem Doppel-Tippen auf "Training starten"), wird diese fortgesetzt
+// statt eine weitere parallele Einheit anzulegen - sonst würden mehrere unbeendete
+// Einheiten gleichzeitig unter "Laufendes Training" auftauchen.
 function startTraining(dayId) {
-  const s = DB.startSession(dayId);
+  const existing = DB.sessions().find(x => x.dayId === dayId && !x.finishedAt);
+  const s = existing || DB.startSession(dayId);
   if (s) navigate('/train/' + s.id);
 }
 
@@ -1512,8 +1514,10 @@ function renderExerciseBlock(s, id, container, ei) {
       entry.sets.push({ weight: prev ? prev.weight : '', reps: prev ? prev.reps : '', done: false });
       DB.save(); renderEntries(container, id);
     },
-    onRemoveSet: () => {
+    onRemoveSet: async () => {
       if (!entry.sets.length) return;
+      const last = entry.sets[entry.sets.length - 1];
+      if (DB.hasData(last) && !(await confirmDialog('Bereits eingetragenen Satz entfernen?', { danger: true, okText: 'Entfernen' }))) return;
       entry.sets.pop(); DB.save(); renderEntries(container, id);
     },
     onRest: () => editRestModal(entry, () => renderEntries(container, id)),
@@ -1919,9 +1923,12 @@ route('/stats', () => {
   html += `<details class="stats-acc" data-acc="topExercises" ${statsAccOpen.topExercises ? 'open' : ''}><summary>Meisttrainierte Übungen</summary>
     <div class="card">
       <div class="tiny muted" style="margin-bottom:6px">${statsPeriod ? statsPeriod + ' Tage' : 'Alle Zeit'}</div>
-      ${topEx.length ? topEx.map(t => `<div class="list-row" data-ex="${t.exerciseId}">
+      ${topEx.length ? topEx.map(t => {
+          const stillExists = !!DB.getExercise(t.exerciseId);
+          return `<div class="list-row ${stillExists ? '' : 'disabled'}" ${stillExists ? `data-ex="${t.exerciseId}"` : ''}>
           <div class="grow"><div class="r-title">${esc(t.name)}</div></div>
-          <div class="tiny muted">${t.count}×</div></div>`).join('')
+          <div class="tiny muted">${t.count}×</div></div>`;
+        }).join('')
         : `<div class="tiny muted center" style="padding:8px">Keine Daten in diesem Zeitraum.</div>`}
     </div>
   </details>`;
@@ -1937,9 +1944,10 @@ route('/stats', () => {
   html += `<details class="stats-acc" data-acc="exercises" ${statsAccOpen.exercises ? 'open' : ''}><summary>Übungen</summary>`;
   list.forEach(e => {
     const pr = DB.exercisePRs(e.id, active.id);
+    const unit = e.unit || 'kg';
     html += `<div class="list-row" data-ex="${e.id}">
       <div class="grow"><div class="r-title">${esc(e.name)} ${locBadge(active)}</div>
-        <div class="r-sub">${pr.sessionsCount}× · Bestes 1RM ${fmtWeight(pr.best1rm)} kg · Max ${fmtWeight(pr.maxWeight)} kg</div></div>
+        <div class="r-sub">${pr.sessionsCount}× · Bestes 1RM ${fmtWeight(pr.best1rm)} ${esc(unit)} · Max ${fmtWeight(pr.maxWeight)} ${esc(unit)}</div></div>
       <span class="arrow">›</span></div>`;
   });
   html += `</details>`;
@@ -1976,19 +1984,20 @@ route('/stats/:id', ({ id }) => {
     return;
   }
 
+  const unit = ex.unit || 'kg';
   const tiles = `
     <div class="streak-row">
-      <div class="stat-tile"><div class="v">${fmtWeight(pr.best1rm)}</div><div class="l">Bestes e1RM (kg)</div></div>
-      <div class="stat-tile"><div class="v">${fmtWeight(pr.maxWeight)}</div><div class="l">Max Gewicht (kg)</div></div>
+      <div class="stat-tile"><div class="v">${fmtWeight(pr.best1rm)}</div><div class="l">Bestes e1RM (${esc(unit)})</div></div>
+      <div class="stat-tile"><div class="v">${fmtWeight(pr.maxWeight)}</div><div class="l">Max Gewicht (${esc(unit)})</div></div>
     </div>
     <div class="streak-row">
       <div class="stat-tile"><div class="v">${fmtWeight(pr.maxVolume)}</div><div class="l">Max Volumen</div></div>
       <div class="stat-tile"><div class="v">${pr.sessionsCount}</div><div class="l">Einheiten</div></div>
     </div>`;
 
-  const e1rmChart = lineChart(hist.map(h => ({ y: h.est1rm, label: fmtShort(h.date) })), 'kg');
+  const e1rmChart = lineChart(hist.map(h => ({ y: h.est1rm, label: fmtShort(h.date) })), unit);
   const volChart = lineChart(hist.map(h => ({ y: h.volume, label: fmtShort(h.date) })), '');
-  const wChart = lineChart(hist.map(h => ({ y: h.maxWeight, label: fmtShort(h.date) })), 'kg');
+  const wChart = lineChart(hist.map(h => ({ y: h.maxWeight, label: fmtShort(h.date) })), unit);
 
   const rows = hist.slice().reverse().map(h => `<tr>
     <td>${fmtShort(h.date)}</td>
@@ -2002,9 +2011,9 @@ route('/stats/:id', ({ id }) => {
   appEl.innerHTML = `
     ${locLine}
     ${tiles}
-    <div class="chart-wrap"><div class="c-title"><span>Geschätztes 1RM (Epley)</span><span>${fmtWeight(pr.best1rm)} kg</span></div>${e1rmChart}</div>
-    <div class="chart-wrap"><div class="c-title"><span>Max. Gewicht je Einheit</span><span>${fmtWeight(pr.maxWeight)} kg</span></div>${wChart}</div>
-    <div class="chart-wrap"><div class="c-title"><span>Volumen (kg gesamt)</span><span>${fmtWeight(pr.maxVolume)}</span></div>${volChart}</div>
+    <div class="chart-wrap"><div class="c-title"><span>Geschätztes 1RM (Epley)</span><span>${fmtWeight(pr.best1rm)} ${esc(unit)}</span></div>${e1rmChart}</div>
+    <div class="chart-wrap"><div class="c-title"><span>Max. Gewicht je Einheit</span><span>${fmtWeight(pr.maxWeight)} ${esc(unit)}</span></div>${wChart}</div>
+    <div class="chart-wrap"><div class="c-title"><span>Volumen (${esc(unit)} gesamt)</span><span>${fmtWeight(pr.maxVolume)}</span></div>${volChart}</div>
     <div class="section-title">Verlauf</div>
     <div class="card" style="overflow-x:auto;padding:6px 10px">
       <table class="hist">
@@ -2098,6 +2107,24 @@ function openTrashModal() {
       $('[data-x]', m).onclick = close;
       draw();
     },
+  });
+}
+
+// Eigener 3-Wege-Dialog statt confirmDialog (dessen "Abbrechen" hier fälschlich
+// "zusammenführen" bedeutet hätte) - "Abbrechen" bricht den Import jetzt wirklich
+// ab (resolve null), statt implizit eine der beiden Import-Varianten auszulösen.
+function pickImportModeModal() {
+  return new Promise(resolve => {
+    const close = openModal({
+      title: 'Backup importieren',
+      body: `<p class="tiny muted" style="margin-top:0">Wie soll das Backup übernommen werden?</p>`,
+      footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn" data-merge>Zusammenführen</button><button class="btn danger" data-replace>Ersetzen</button>`,
+      onMount: (m, c) => {
+        $('[data-x]', m).onclick = () => { c(); resolve(null); };
+        $('[data-merge]', m).onclick = () => { c(); resolve('merge'); };
+        $('[data-replace]', m).onclick = () => { c(); resolve('replace'); };
+      },
+    });
   });
 }
 
@@ -2211,7 +2238,7 @@ route('/settings', () => {
       <hr class="sep" />
       <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Beispieldaten</div>
       <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
-        <input id="s-demo" type="checkbox" ${s.demoDataEnabled ? 'checked' : ''} style="width:auto" />
+        <input id="s-demo" type="checkbox" ${activeLoc && DB.hasDemoSessions(activeLoc.id) ? 'checked' : ''} style="width:auto" />
         <span style="margin:0">Beispieldaten (ca. 2 Monate Testtrainings)</span></label>
       <p class="tiny muted" style="margin:8px 0 0">Erzeugt bzw. entfernt plausible Testeinheiten für <b>${activeLoc ? esc(activeLoc.emoji) + ' ' + esc(activeLoc.name) : 'den aktiven Ort'}</b>, um Statistik &amp; Kalender auszuprobieren. Braucht mindestens einen Trainingstag mit Übungen an diesem Ort.</p>
 
@@ -2288,9 +2315,11 @@ route('/settings', () => {
   impFile.onchange = async () => {
     const file = impFile.files[0]; if (!file) return;
     const text = await file.text();
-    const mode = await confirmDialog('Backup importieren: Bestehende Daten ERSETZEN? (Abbrechen = zusammenführen)', { okText: 'Ersetzen' });
-    try { DB.importData(text, mode ? 'replace' : 'merge'); toast('Import erfolgreich'); applyDisplaySettings(); render(); }
-    catch (e) { toast('Import fehlgeschlagen: ' + e.message); }
+    const mode = await pickImportModeModal();
+    if (mode) {
+      try { DB.importData(text, mode); toast('Import erfolgreich'); applyDisplaySettings(); render(); }
+      catch (e) { toast('Import fehlgeschlagen: ' + e.message); }
+    }
     impFile.value = '';
   };
 
@@ -2301,12 +2330,10 @@ route('/settings', () => {
       if (!activeLoc) { toast('Erst einen Ort anlegen'); e.target.checked = false; return; }
       const n = DB.generateDemoSessions(activeLoc.id);
       if (!n) { toast('Braucht mind. einen Trainingstag mit Übungen an diesem Ort'); e.target.checked = false; return; }
-      s.demoDataEnabled = true; DB.save();
       toast(n + ' Beispiel-Trainings erzeugt');
     } else {
-      DB.removeDemoSessions();
-      s.demoDataEnabled = false; DB.save();
-      toast('Beispieldaten entfernt');
+      DB.removeDemoSessions(activeLoc ? activeLoc.id : null);
+      toast('Beispieldaten für diesen Ort entfernt');
     }
   };
 

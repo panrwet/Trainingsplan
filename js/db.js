@@ -305,11 +305,6 @@ export function removeDayExercise(dayId, itemId) {
   const day = getDay(dayId); if (!day) return;
   day.exercises = day.exercises.filter(x => x.id !== itemId); save();
 }
-export function reorderDayExercises(dayId, orderedItemIds) {
-  const day = getDay(dayId); if (!day) return;
-  day.exercises.sort((a, b) => orderedItemIds.indexOf(a.id) - orderedItemIds.indexOf(b.id));
-  save();
-}
 
 // ---------- Supersätze/Zirkel (mehrere Übungen zu einer Gruppe verbinden) ----------
 // Gruppierte Übungen werden zu einem zusammenhängenden Block verschoben
@@ -571,6 +566,7 @@ export function lastEntryFor(exerciseId, beforeSessionId = null, locationId = nu
   const cutoff = current ? current.startedAt : Infinity;
   for (const s of all) {
     if (s.id === beforeSessionId) continue;
+    if (!s.finishedAt) continue; // abgebrochene/laufende Einheiten liefern kein verlässliches "letztes Mal"
     if ((s.startedAt || 0) >= cutoff) continue;
     if (locationId && s.locationId !== locationId) continue;
     const e = (s.entries || []).find(en => en.exerciseId === exerciseId && (en.sets || []).some(hasData));
@@ -789,11 +785,13 @@ export function generateDemoSessions(locationId) {
   save();
   return count;
 }
-export function removeDemoSessions() {
-  const d = db(); d.sessions = d.sessions.filter(s => !s.demo); save();
+export function removeDemoSessions(locationId = null) {
+  const d = db();
+  d.sessions = d.sessions.filter(s => !(s.demo && (!locationId || s.locationId === locationId)));
+  save();
 }
-export function hasDemoSessions() {
-  return db().sessions.some(s => s.demo);
+export function hasDemoSessions(locationId = null) {
+  return db().sessions.some(s => s.demo && (!locationId || s.locationId === locationId));
 }
 
 // Entfernt NUR die aufgezeichneten Trainingseinheiten (inkl. Papierkorb-Einheiten und
@@ -821,9 +819,14 @@ export function globalSearch(query) {
 
 // ---------- Kalender ----------
 // Map: 'YYYY-MM-DD' -> [ {emoji,color,name,sessionId} ... ]
+// Nur ABGESCHLOSSENE Einheiten (konsistent mit allen anderen Statistik-Funktionen
+// hier - ein laufendes/nicht beendetes Training soll weder den Kalender-Punkt noch
+// Streak/Monatszahl beeinflussen, sonst könnte man beides durch bloßes Starten
+// ohne Beenden künstlich aufblähen).
 export function sessionsByDate() {
   const map = {};
   for (const s of db().sessions) {
+    if (!s.finishedAt) continue;
     const key = s.date;
     (map[key] ||= []).push({ emoji: s.emoji, color: s.color, name: s.dayName || 'Training', sessionId: s.id });
   }
