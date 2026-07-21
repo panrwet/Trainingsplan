@@ -10,7 +10,7 @@ Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – instal
 - **Farbige Labels** – Muskelgruppen (blau) und Geräte-Arten (grün) werden als farbige Badges angezeigt, in der Bibliothek, im Trainingstag und während des Trainings. Abschaltbar unter *Einstellungen → Anzeige*.
 - **Hierarchie:** **Ort** (z. B. Sports Club Kiel, Zuhause) → **Trainingsplan** → **Trainingstag** → **Übungen**
 - **Orte oben als Reiter** – der aktive Ort filtert die ganze App. Tippen auf den **bereits aktiven** Reiter öffnet dessen Bearbeiten-Dialog (Name/Emoji/Farbe/Löschen); Tippen auf einen anderen Reiter wechselt dorthin. **Statistik, „letztes Mal" und Verlauf sind je Ort getrennt**, weil Geräte zwischen Gyms nicht vergleichbar sind (z. B. Brustpresse 80 kg in Gym A ≙ 50 kg in Gym B). Das Orts-Kürzel steht klein neben Plan/Trainingstag/Übung.
-- **Pläne aufklappbar** – auf *Pläne* zeigt ein Tipp auf einen Plan direkt seine Trainingstage mit „Start ▶"-Button, ganz ohne Seitenwechsel. Das „✏️" öffnet die volle Plan-Verwaltung (Name/Emoji/Farbe, Trainingstage hinzufügen/entfernen/umsortieren). *Start* zeigt dafür nur noch laufende/letzte Trainings – keine doppelte Plan-Liste mehr.
+- **Pläne ist die Startseite** – der separate *Start*-Tab wurde entfernt (hatte keine eigene Funktion mehr). *Pläne* zeigt oben ein laufendes Training zum Fortsetzen, darunter jeder Plan aufklappbar: antippen zeigt direkt die Trainingstage mit „Start ▶"-Button, ganz ohne Seitenwechsel. Das „✏️" öffnet die volle Plan-Verwaltung (Name/Emoji/Farbe, Trainingstage hinzufügen/entfernen/umsortieren).
 - **Plan in ein anderes Gym übernehmen** – ein Trainingsplan (inkl. aller Trainingstage & Zielwerte) lässt sich per Knopfdruck als unabhängige Kopie an einen anderen Ort kopieren, da das Kerntraining ja gleich bleibt. Original und Kopie sind danach getrennt frei änderbar.
 - **Training aufzeichnen** – Gewicht & Wiederholungen je Satz eingeben, als Platzhalter direkt der letzte Wert (je Ort).
 - **Schlanker Übungskopf im Training** – nur Name + „⋮"-Menü. Darin: Pause ändern, Satz hinzufügen/entfernen, Notiz, Übung entfernen.
@@ -105,7 +105,7 @@ alle mit an Hypertrophie-/Kraft-Richtwerten orientierten Ziel-Sätzen/Wdh./Pause
 (Grundübungen 4-7 Wdh. mit langer Pause, Isolationsübungen 10-15 Wdh. kürzer). Passe die Zielwerte
 gern an dein Niveau an – und lösch/deaktiviere, welche Pläne du nicht brauchst.
 
-1. Auf *Start* einen Trainingstag mit **▶ Start** beginnen, Gewichte & Wdh. eintragen, Sätze abhaken.
+1. Auf *Pläne* einen Plan antippen (klappt die Trainingstage auf) und mit **Start ▶** beginnen, Gewichte & Wdh. eintragen, Sätze abhaken.
 2. Trainierst du auch an einem zweiten Ort? Oben auf **＋** einen neuen Ort anlegen, dann den
    bestehenden Plan per **📤** (im Plan oben) dorthin kopieren – die Kopie ist danach unabhängig
    änderbar.

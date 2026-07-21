@@ -406,7 +406,6 @@ a { color: var(--accent); }
   <main id="app"><!-- views render here --></main>
 
   <nav id="tabbar">
-    <a href="#/" class="tab" data-tab="home"><span class="tico">🏠</span><span>Start</span></a>
     <a href="#/plans" class="tab" data-tab="plans"><span class="tico">📋</span><span>Pläne</span></a>
     <a href="#/calendar" class="tab" data-tab="calendar"><span class="tico">📅</span><span>Kalender</span></a>
     <a href="#/stats" class="tab" data-tab="stats"><span class="tico">📈</span><span>Statistik</span></a>
@@ -1134,8 +1133,11 @@ function route(pattern, handler) {
 
 function navigate(hash) { location.hash = hash; }
 
+// Pläne ist die neue Startseite (Start-Tab entfällt - hatte keine eigene
+// Funktion mehr, nachdem "Laufendes Training" nach Pläne gewandert und
+// "Zuletzt" entfernt wurde, da der Kalender diese Übersicht bereits bietet).
 function render() {
-  const hash = location.hash.replace(/^#/, '') || '/';
+  const hash = location.hash.replace(/^#/, '') || '/plans';
   for (const r of routes) {
     const m = hash.match(r.rx);
     if (m) {
@@ -1147,92 +1149,17 @@ function render() {
       return;
     }
   }
-  navigate('/');
+  navigate('/plans');
 }
 function updateTabs(hash) {
-  let active = 'home';
-  if (hash.startsWith('/plans') || hash.startsWith('/plan') || hash.startsWith('/day')) active = 'plans';
+  let active = 'plans';
+  if (hash.startsWith('/plans') || hash.startsWith('/plan') || hash.startsWith('/day') || hash.startsWith('/train')) active = 'plans';
   else if (hash.startsWith('/calendar')) active = 'calendar';
   else if (hash.startsWith('/stats')) active = 'stats';
   else if (hash.startsWith('/library') || hash.startsWith('/exercise')) active = 'library';
-  else if (hash.startsWith('/train') || hash === '/' || hash.startsWith('/history')) active = 'home';
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === active));
 }
 window.addEventListener('hashchange', render);
-
-// ============================================================
-//  Ansicht: Start / Home
-// ============================================================
-route('/', () => {
-  setChrome({ title: 'Training', back: false });
-  const locs = DB.locations();
-  const active = DB.getActiveLocation();
-
-  let html = locationBarHTML();
-
-  if (!locs.length) {
-    html += `<div class="empty">
-      <div class="big">📍</div>
-      <div>Lege zuerst einen Trainingsort an.</div>
-      <div class="tiny" style="margin:8px 0 14px">Ein Ort ist z.B. „Fitnessstudio" oder „Zuhause". Die Daten werden je Ort getrennt geführt (Geräte sind zwischen Gyms nicht vergleichbar).</div>
-      <button class="btn primary" data-add-loc>+ Ort anlegen</button>
-    </div>`;
-    appEl.innerHTML = html;
-    const a = $('[data-add-loc]', appEl); if (a) a.onclick = () => editLocationModal(null);
-    return;
-  }
-
-  const locId = active.id;
-  const unfinished = DB.sessions().filter(s => !s.finishedAt && s.locationId === locId);
-  const recent = DB.sessions().filter(s => s.finishedAt && s.locationId === locId).slice(0, 5);
-
-  if (unfinished.length) {
-    html += `<div class="section-title">Laufendes Training</div>`;
-    unfinished.forEach(s => {
-      const doneSets = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).length, 0);
-      html += `<div class="card tap" data-goto="/train/${s.id}">
-        <div class="train-head">
-          <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '💪')}</div>
-          <div style="flex:1">
-            <div style="font-weight:700">${esc(s.dayName || 'Training')}</div>
-            <div class="tiny muted">${fmtDate(s.date)} · ${doneSets} Sätze erledigt</div>
-          </div>
-          <span class="btn primary sm">Weiter ›</span>
-        </div>
-      </div>`;
-    });
-  }
-
-  if (recent.length) {
-    html += `<div class="section-title" style="display:flex;justify-content:space-between">
-      <span>Zuletzt</span><a href="#/history" class="tiny">alle ›</a></div>`;
-    recent.forEach(s => { html += sessionRow(s); });
-  }
-
-  if (!unfinished.length && !recent.length) {
-    html += `<div class="empty">
-      <div class="big">💪</div>
-      <div>Bereit für dein nächstes Training?</div>
-      <div class="tiny" style="margin:8px 0 14px">Wähle unter „Pläne" einen Trainingstag zum Starten.</div>
-      <a class="btn primary" href="#/plans">Zu den Plänen</a>
-    </div>`;
-  }
-
-  appEl.innerHTML = html;
-  wireLocationBar(appEl);
-  $$('[data-goto]', appEl).forEach(n => n.onclick = () => navigate(n.dataset.goto));
-  $$('[data-session]', appEl).forEach(n => n.onclick = () => navigate('/train/' + n.dataset.session));
-});
-
-function sessionRow(s) {
-  const totalSets = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).length, 0);
-  const vol = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).reduce((x, st) => x + DB.num(st.weight) * DB.num(st.reps), 0), 0);
-  return `<div class="list-row" data-session="${s.id}">
-    <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '💪')}</div>
-    <div class="grow"><div class="r-title">${esc(s.dayName || 'Training')}</div>
-      <div class="r-sub">${fmtDate(s.date)} · ${totalSets} Sätze · ${fmtWeight(vol)} kg Vol.</div></div>
-    <span class="arrow">›</span></div>`;
-}
 
 function startTraining(dayId) {
   const s = DB.startSession(dayId);
@@ -1258,6 +1185,24 @@ route('/plans', () => {
 
   const active = DB.getActiveLocation();
   const plans = DB.plansByLocation(active.id);
+  const unfinished = DB.sessions().filter(s => !s.finishedAt && s.locationId === active.id);
+
+  if (unfinished.length) {
+    html += `<div class="section-title">Laufendes Training</div>`;
+    unfinished.forEach(s => {
+      const doneSets = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).length, 0);
+      html += `<div class="card tap" data-goto="/train/${s.id}">
+        <div class="train-head">
+          <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '💪')}</div>
+          <div style="flex:1">
+            <div style="font-weight:700">${esc(s.dayName || 'Training')}</div>
+            <div class="tiny muted">${fmtDate(s.date)} · ${doneSets} Sätze erledigt</div>
+          </div>
+          <span class="btn primary sm">Weiter ›</span>
+        </div>
+      </div>`;
+    });
+  }
 
   html += `<div class="section-title">Pläne · ${esc(active.emoji)} ${esc(active.name)}</div>`;
 
@@ -1289,6 +1234,7 @@ route('/plans', () => {
 
   appEl.innerHTML = html;
   wireLocationBar(appEl);
+  $$('[data-goto]', appEl).forEach(n => n.onclick = () => navigate(n.dataset.goto));
   $$('[data-edit-plan]', appEl).forEach(b => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); navigate('/plan/' + b.dataset.editPlan); });
   $$('[data-start]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); startTraining(n.dataset.start); });
   appEl.append(el('button', { class: 'fab', onclick: () => editPlanModal(null, active.id) }, '+'));
@@ -1896,7 +1842,7 @@ let restTimer = null;
 
 route('/train/:id', ({ id }) => {
   const s = DB.getSession(id);
-  if (!s) return navigate('/');
+  if (!s) return navigate('/plans');
   const finished = !!s.finishedAt;
   setChrome({ title: s.dayName || 'Training', back: true, actions: [actionBtn('🗑️', () => discardSession(id))] });
 
@@ -1965,7 +1911,7 @@ function renderTrain(container, id) {
     DB.updateSession(id, { finishedAt: Date.now() });
     stopRest();
     toast('Training gespeichert 💪');
-    navigate('/');
+    navigate('/plans');
   };
   const reopenBtn = $('#reopenBtn', container);
   if (reopenBtn) reopenBtn.onclick = () => { DB.updateSession(id, { finishedAt: null }); renderTrain(container, id); };
@@ -2250,29 +2196,9 @@ function beep() {
 
 function discardSession(id) {
   confirmDialog('Dieses Training verwerfen und löschen?', { danger: true, okText: 'Verwerfen' }).then(ok => {
-    if (ok) { DB.deleteSession(id); stopRest(); navigate('/'); }
+    if (ok) { DB.deleteSession(id); stopRest(); navigate('/plans'); }
   });
 }
-
-// ============================================================
-//  Ansicht: Verlauf
-// ============================================================
-route('/history', () => {
-  setChrome({ title: 'Verlauf', back: true });
-  const list = DB.sessions();
-  let html = '';
-  if (!list.length) html = `<div class="empty"><div class="big">📖</div><div>Noch keine Trainings aufgezeichnet.</div></div>`;
-  else {
-    let curMonth = '';
-    list.forEach(s => {
-      const d = parseISO(s.date); const mk = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
-      if (mk !== curMonth) { curMonth = mk; html += `<div class="section-title">${mk}</div>`; }
-      html += sessionRow(s) + (s.finishedAt ? '' : ' ');
-    });
-  }
-  appEl.innerHTML = html;
-  $$('[data-session]', appEl).forEach(n => n.onclick = () => navigate('/train/' + n.dataset.session));
-});
 
 // ============================================================
 //  Ansicht: Kalender (Habit-Tracker)
@@ -2551,7 +2477,7 @@ route('/settings', () => {
   };
   $('#wipeBtn', appEl).onclick = async () => {
     if (await confirmDialog('Wirklich ALLE Daten unwiderruflich löschen?', { danger: true, okText: 'Alles löschen' })) {
-      DB.wipeAll(); toast('Alle Daten gelöscht'); navigate('/');
+      DB.wipeAll(); toast('Alle Daten gelöscht'); navigate('/plans');
     }
   };
 });
