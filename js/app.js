@@ -141,6 +141,11 @@ function shade(hex, percent) {
   const b = clamp((n & 0xff) + Math.round(255 * percent));
   return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
 }
+// Hex-Farbe in rgba() mit gegebener Deckkraft umwandeln (für die Label-Hintergründe).
+function withAlpha(hex, alpha) {
+  const n = parseInt(String(hex).replace('#', ''), 16);
+  return `rgba(${(n >> 16) & 0xff}, ${(n >> 8) & 0xff}, ${n & 0xff}, ${alpha})`;
+}
 function applyDisplaySettings() {
   const s = DB.db().settings;
   const theme = resolveTheme(s.theme);
@@ -150,6 +155,12 @@ function applyDisplaySettings() {
   const accent = s.accentColor || '#6c8cff';
   document.documentElement.style.setProperty('--accent', accent);
   document.documentElement.style.setProperty('--accent-2', shade(accent, -0.22));
+  const muscleColor = s.muscleColor || '#7dd3fc';
+  const equipColor = s.equipColor || '#86efac';
+  document.documentElement.style.setProperty('--muscle-color', muscleColor);
+  document.documentElement.style.setProperty('--muscle-bg', withAlpha(muscleColor, 0.16));
+  document.documentElement.style.setProperty('--equip-color', equipColor);
+  document.documentElement.style.setProperty('--equip-bg', withAlpha(equipColor, 0.16));
   const metaTheme = document.querySelector('meta[name="theme-color"]');
   if (metaTheme) metaTheme.content = BG_BY_THEME[theme] || '#0f1220';
 }
@@ -563,6 +574,23 @@ function reorderStep(list, i, dir) {
     const block = list.splice(start, blockLen);
     list.splice(ne - blockLen + 1, 0, ...block);
   }
+}
+
+// Analog zu DB.groupExercises/regroupContiguous, aber index-basiert - Trainings-
+// Entries haben (anders als Trainingstag-Übungen) keine eigene stabile id. Verschiebt
+// die ausgewählten Indizes (in Auswahl-Reihenfolge) zu einem zusammenhängenden Block
+// an der Position des ERSTEN ausgewählten Elements, sonst wäre die neue Zirkel-Gruppe
+// nicht lückenlos (Superset-Rendering/Pausenlogik setzen das voraus).
+function regroupByIndex(list, selectedIndices) {
+  const idxSet = new Set(selectedIndices);
+  const selected = selectedIndices.map(i => list[i]).filter(Boolean);
+  if (selected.length < 2) return;
+  const insertAt = list.findIndex((x, i) => idxSet.has(i));
+  const others = list.filter((x, i) => !idxSet.has(i));
+  const insertAtInOthers = list.slice(0, insertAt).filter((x, i) => !idxSet.has(i)).length;
+  others.splice(insertAtInOthers, 0, ...selected);
+  list.length = 0;
+  list.push(...others);
 }
 
 function editDayModal(id, planId) {
@@ -1008,12 +1036,22 @@ function manageEquipmentModal() {
       const val = $(`#f-rename-${rid}`, listEl).value.trim();
       if (val) DB.renameEquipmentType(rid, val);
       editingId = null; draw(m);
+      cleanupAndRefresh();
     });
     $$('[data-del]', listEl).forEach(b => b.onclick = async () => {
       const rid = b.dataset.del; const eq = DB.getEquipmentType(rid); const uses = DB.equipmentUsage(rid);
       const warn = uses ? `„${eq.name}" wird bei ${uses} Übung(en) verwendet. Beim Löschen wird das Gerät dort entfernt (Übung bleibt erhalten). Trotzdem löschen?` : `„${eq.name}" löschen?`;
-      if (await confirmDialog(warn, { danger: true, okText: 'Löschen' })) { DB.deleteEquipmentType(rid); draw(m); }
+      if (await confirmDialog(warn, { danger: true, okText: 'Löschen' })) { DB.deleteEquipmentType(rid); draw(m); cleanupAndRefresh(); }
     });
+  }
+  // Veraltete Filterauswahl bereinigen (falls ein gefilterter Name umbenannt/gelöscht
+  // wurde) und die Bibliothek dahinter aktualisieren - direkt nach jeder Änderung,
+  // nicht erst beim Schließen (das Modal kann auch per Klick auf den Hintergrund
+  // geschlossen werden, was den "Fertig"-Button-Handler umgeht).
+  function cleanupAndRefresh() {
+    const validNames = new Set(DB.equipmentTypes().map(e => e.name));
+    [...libFilter.equipment].forEach(n => { if (!validNames.has(n)) libFilter.equipment.delete(n); });
+    render();
   }
   openModal({
     title: 'Geräte-Arten verwalten',
@@ -1024,19 +1062,14 @@ function manageEquipmentModal() {
       <div id="eqList"></div>`,
     footer: `<button class="btn ghost" data-x>Fertig</button>`,
     onMount: (m, close) => {
-      $('[data-x]', m).onclick = () => {
-        close();
-        // veraltete Filterauswahl bereinigen, falls ein gefilterter Name umbenannt/gelöscht wurde
-        const validNames = new Set(DB.equipmentTypes().map(e => e.name));
-        [...libFilter.equipment].forEach(n => { if (!validNames.has(n)) libFilter.equipment.delete(n); });
-        render();
-      };
+      $('[data-x]', m).onclick = close;
       $('#addEqBtn', m).onclick = () => {
         const name = $('#f-newEq', m).value.trim();
         if (!name) return toast('Bitte einen Namen eingeben');
         DB.addEquipmentType(name);
         $('#f-newEq', m).value = '';
         draw(m);
+        cleanupAndRefresh();
       };
       draw(m);
     },
@@ -1095,12 +1128,20 @@ function manageMuscleGroupsModal() {
       const val = $(`#f-mgrename-${rid}`, listEl).value.trim();
       if (val) DB.renameMuscleGroup(rid, val);
       editingId = null; draw(m);
+      cleanupAndRefresh();
     });
     $$('[data-del]', listEl).forEach(b => b.onclick = async () => {
       const rid = b.dataset.del; const mg = DB.getMuscleGroup(rid); const uses = DB.muscleGroupUsage(rid);
       const warn = uses ? `„${mg.name}" wird bei ${uses} Übung(en) verwendet. Beim Löschen wird das Tag dort entfernt (Übung bleibt erhalten). Trotzdem löschen?` : `„${mg.name}" löschen?`;
-      if (await confirmDialog(warn, { danger: true, okText: 'Löschen' })) { DB.deleteMuscleGroup(rid); draw(m); }
+      if (await confirmDialog(warn, { danger: true, okText: 'Löschen' })) { DB.deleteMuscleGroup(rid); draw(m); cleanupAndRefresh(); }
     });
+  }
+  // Siehe manageEquipmentModal: direkt nach jeder Änderung aktualisieren, nicht erst
+  // beim Schließen (Backdrop-Klick würde den "Fertig"-Button-Handler sonst umgehen).
+  function cleanupAndRefresh() {
+    const validNames = new Set(DB.muscleGroups().map(mg => mg.name));
+    [...libFilter.muscles].forEach(n => { if (!validNames.has(n)) libFilter.muscles.delete(n); });
+    render();
   }
   openModal({
     title: 'Muskelgruppen verwalten',
@@ -1111,18 +1152,14 @@ function manageMuscleGroupsModal() {
       <div id="mgList"></div>`,
     footer: `<button class="btn ghost" data-x>Fertig</button>`,
     onMount: (m, close) => {
-      $('[data-x]', m).onclick = () => {
-        close();
-        const validNames = new Set(DB.muscleGroups().map(mg => mg.name));
-        [...libFilter.muscles].forEach(n => { if (!validNames.has(n)) libFilter.muscles.delete(n); });
-        render();
-      };
+      $('[data-x]', m).onclick = close;
       $('#addMgBtn', m).onclick = () => {
         const name = $('#f-newMg', m).value.trim();
         if (!name) return toast('Bitte einen Namen eingeben');
         DB.addMuscleGroup(name);
         $('#f-newMg', m).value = '';
         draw(m);
+        cleanupAndRefresh();
       };
       draw(m);
     },
@@ -1143,7 +1180,6 @@ const trainSelected = new Set(); // Entry-Indizes während der Zirkel-Auswahl
 route('/train/:id', ({ id }) => {
   const s = DB.getSession(id);
   if (!s) return navigate('/plans');
-  setChrome({ title: s.dayName || 'Training', back: true, actions: [actionBtn('🗑️', () => discardSession(id))] });
   trainMode = null; trainSelected.clear();
 
   const container = el('div');
@@ -1152,10 +1188,72 @@ route('/train/:id', ({ id }) => {
   appEl.append(container);
 });
 
+// Alles rund um Training-Struktur (Zirkel, Reihenfolge, Übung hinzufügen, Farbe,
+// Trainingstag/Plan bearbeiten) gebündelt hinter einem "⚙️"-Button - hält die
+// eigentliche Trainingsansicht schlank (nur Name/Datum/Notiz + Übungen + Beenden).
+function trainSettingsModal(s, container, id) {
+  const day = DB.getDay(s.dayId);
+  const plan = DB.getPlan(s.planId);
+  openModal({
+    title: 'Training – Einstellungen',
+    body: `<div class="sheet">
+      ${s.entries.length > 1 ? `<button class="sheet-btn" data-act="group">🔗 Zirkel erstellen</button>
+      <button class="sheet-btn" data-act="reorder">↕ Reihenfolge anpassen</button>` : ''}
+      <button class="sheet-btn" data-act="addex">➕ Übung hinzufügen</button>
+      <button class="sheet-btn" data-act="color">🎨 Farbe ändern</button>
+      ${day ? '<button class="sheet-btn" data-act="editday">✏️ Trainingstag bearbeiten</button>' : ''}
+      ${plan ? '<button class="sheet-btn" data-act="editplan">📋 Plan bearbeiten</button>' : ''}
+    </div>`,
+    footer: `<button class="btn ghost block" data-x>Schließen</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      const group = $('[data-act="group"]', m);
+      if (group) group.onclick = () => { close(); trainMode = 'select'; trainSelected.clear(); renderTrain(container, id); };
+      const reorder = $('[data-act="reorder"]', m);
+      if (reorder) reorder.onclick = () => { close(); trainMode = 'reorder'; renderTrain(container, id); };
+      $('[data-act="addex"]', m).onclick = () => {
+        close();
+        pickExerciseModal(exId => {
+          const ex = DB.getExercise(exId);
+          const s2 = DB.getSession(id);
+          const cfg = DB.db().settings;
+          const sets = [];
+          for (let i = 0; i < cfg.defaultSets; i++) sets.push({ weight: '', reps: '', done: false });
+          s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: cfg.defaultReps, targetSets: cfg.defaultSets, restSec: cfg.defaultRestSec, groupId: null, sets });
+          DB.save(); renderTrain(container, id);
+        });
+      };
+      $('[data-act="color"]', m).onclick = () => { close(); trainColorModal(s, container, id); };
+      const editday = $('[data-act="editday"]', m);
+      if (editday) editday.onclick = () => { close(); navigate('/day/' + s.dayId); };
+      const editplan = $('[data-act="editplan"]', m);
+      if (editplan) editplan.onclick = () => { close(); navigate('/plan/' + s.planId); };
+    },
+  });
+}
+
+function trainColorModal(s, container, id) {
+  openModal({
+    title: 'Farbe',
+    body: `<div class="color-pick" id="t-color-modal">${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c}" class="${c === s.color ? 'sel' : ''}"></button>`).join('')}</div>`,
+    onMount: (m, close) => {
+      $$('#t-color-modal button', m).forEach(b => b.onclick = () => {
+        DB.updateSession(id, { color: b.dataset.c });
+        close();
+        renderTrain(container, id);
+      });
+    },
+  });
+}
+
 function renderTrain(container, id) {
   const s = DB.getSession(id);
   if (!s) return;
   const finished = !!s.finishedAt;
+  setChrome({
+    title: s.dayName || 'Training', back: true,
+    actions: trainMode ? [] : [actionBtn('⚙️', () => trainSettingsModal(s, container, id)), actionBtn('🗑️', () => discardSession(id))],
+  });
 
   let html = `
     <div class="card">
@@ -1166,22 +1264,15 @@ function renderTrain(container, id) {
           <input id="t-date" type="date" value="${esc(s.date)}" style="margin-top:6px;width:auto" />
         </div>
       </div>
-      <label class="field" style="margin:10px 0 0"><span>Farbe</span></label>
-      <div class="color-pick" id="t-color">${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c};width:24px;height:24px" class="${c === s.color ? 'sel' : ''}"></button>`).join('')}</div>
       <label class="field" style="margin:12px 0 0"><span>Notiz</span><textarea id="t-note" placeholder="z.B. gut drauf, Schulter zwickt …">${esc(s.note || '')}</textarea></label>
     </div>
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
       <span>Übungen</span>
       ${trainMode === 'select' ? `<span class="tiny muted">${trainSelected.size} ausgewählt</span>`
-        : trainMode === 'reorder' ? `<span class="tiny muted">Reihenfolge anpassen</span>`
-        : (s.entries.length > 1 ? `<div style="display:flex;gap:6px">
-            <button class="btn ghost sm" id="trainGroupBtn">🔗 Zirkel erstellen</button>
-            <button class="btn ghost sm" id="trainReorderBtn">↕ Reihenfolge</button>
-          </div>` : '')}
+        : trainMode === 'reorder' ? `<span class="tiny muted">Reihenfolge anpassen</span>` : ''}
     </div>
     <div id="entries"></div>
-    ${trainMode ? '' : `<button class="btn block" id="addEx" style="margin-top:6px">+ Übung hinzufügen</button>
-    <hr class="sep" />
+    ${trainMode ? '' : `<hr class="sep" />
     ${finished
       ? `<button class="btn primary block" id="reopenBtn">Als „laufend" markieren</button>`
       : `<button class="btn good block" id="finishBtn">✓ Training beenden</button>`}`}
@@ -1192,29 +1283,8 @@ function renderTrain(container, id) {
   // Kopf-Felder
   $('#t-date', container).onchange = e => DB.updateSession(id, { date: e.target.value });
   $('#t-note', container).oninput = e => DB.updateSession(id, { note: e.target.value });
-  $$('#t-color button', container).forEach(b => b.onclick = () => {
-    DB.updateSession(id, { color: b.dataset.c });
-    $$('#t-color button', container).forEach(x => x.classList.remove('sel')); b.classList.add('sel');
-    const chip = $('#t-chip', container); chip.style.background = b.dataset.c + '22'; chip.style.color = b.dataset.c;
-  });
 
   renderEntries(container, id);
-
-  const trainGroupBtn = $('#trainGroupBtn', container);
-  if (trainGroupBtn) trainGroupBtn.onclick = () => { trainMode = 'select'; trainSelected.clear(); renderTrain(container, id); };
-  const trainReorderBtn = $('#trainReorderBtn', container);
-  if (trainReorderBtn) trainReorderBtn.onclick = () => { trainMode = 'reorder'; renderTrain(container, id); };
-
-  const addEx = $('#addEx', container);
-  if (addEx) addEx.onclick = () => pickExerciseModal(exId => {
-    const ex = DB.getExercise(exId);
-    const s2 = DB.getSession(id);
-    const cfg = DB.db().settings;
-    const sets = [];
-    for (let i = 0; i < cfg.defaultSets; i++) sets.push({ weight: '', reps: '', done: false });
-    s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: cfg.defaultReps, targetSets: cfg.defaultSets, restSec: cfg.defaultRestSec, groupId: null, sets });
-    DB.save(); renderTrain(container, id);
-  });
 
   const finishBtn = $('#finishBtn', container);
   if (finishBtn) finishBtn.onclick = async () => {
@@ -1321,7 +1391,9 @@ function renderEntries(container, id) {
     $('#confirmTrainGroupBtn', bar).onclick = () => {
       if (trainSelected.size < 2) return;
       const gid = DB.uid('grp');
-      [...trainSelected].forEach(idx => { if (s.entries[idx]) s.entries[idx].groupId = gid; });
+      const orderedIdx = [...trainSelected];
+      orderedIdx.forEach(idx => { if (s.entries[idx]) s.entries[idx].groupId = gid; });
+      regroupByIndex(s.entries, orderedIdx);
       DB.save();
       toast('Zirkel erstellt');
       trainMode = null; trainSelected.clear();
@@ -1769,7 +1841,10 @@ function dayDetailModal(dateKey, evs) {
 // ============================================================
 //  Ansicht: Statistik
 // ============================================================
-let statsVolPeriod = 7;
+let statsPeriod = 7; // 7 | 30 | null (Alle) - EIN Umschalter für Gesamt-Übersicht + Muskelgruppen-Volumen
+// Auf-/zugeklappt-Zustand der Statistik-Abschnitte - modulglobal, damit ein Klick auf
+// den Zeitraum-Umschalter (voller render()) den Zustand nicht zurücksetzt.
+let statsAccOpen = { overview: true, volume: false, exercises: true };
 route('/stats', () => {
   setChrome({ title: 'Statistik', back: false });
   const locs = DB.locations();
@@ -1796,37 +1871,43 @@ route('/stats', () => {
     return;
   }
 
+  // Ein gemeinsamer Zeitraum-Umschalter für Gesamt-Übersicht + Muskelgruppen-Volumen,
+  // damit beide Sektionen konsistent zum selben Zeitraum gehören (statt zwei getrennte,
+  // evtl. unterschiedlich eingestellte Filter zu haben).
+  const periodBar = `<div class="btn-row" style="margin-bottom:12px">
+    <button class="btn ${statsPeriod === 7 ? 'primary' : 'ghost'} sm" data-period="7">7 Tage</button>
+    <button class="btn ${statsPeriod === 30 ? 'primary' : 'ghost'} sm" data-period="30">30 Tage</button>
+    <button class="btn ${!statsPeriod ? 'primary' : 'ghost'} sm" data-period="0">Alle</button>
+  </div>`;
+
   // ---------- Gesamt-Übersicht (übungsübergreifend) ----------
-  const freq = DB.weeklyFrequency(active.id, 8);
   const totalFinished = DB.sessions().filter(s => s.finishedAt && s.locationId === active.id).length;
-  const avgPerWeek = freq.reduce((a, b) => a + b.count, 0) / freq.length;
+  const periodCount = DB.sessionCountInPeriod(active.id, statsPeriod);
   const overallHist = DB.overallVolumeHistory(active.id, 26);
   const overallChart = lineChart(overallHist.map(h => ({ y: h.volume, label: fmtShort(h.date) })), '');
-  const topEx = DB.topExercisesByFrequency(active.id, 5);
-  html += `<div class="section-title">Gesamt-Übersicht</div>
+  const topEx = DB.topExercisesByFrequency(active.id, statsPeriod, 5);
+  html += `<details class="stats-acc" data-acc="overview" ${statsAccOpen.overview ? 'open' : ''}><summary>Gesamt-Übersicht</summary>
+    ${periodBar}
     <div class="streak-row">
       <div class="stat-tile"><div class="v">${totalFinished}</div><div class="l">Trainings gesamt</div></div>
-      <div class="stat-tile"><div class="v">${avgPerWeek.toFixed(1)}</div><div class="l">Ø Einheiten/Woche (8W)</div></div>
+      <div class="stat-tile"><div class="v">${periodCount}</div><div class="l">Einheiten (${statsPeriod ? statsPeriod + ' Tage' : 'alle'})</div></div>
     </div>
-    <div class="chart-wrap"><div class="c-title"><span>Trainingsvolumen je Einheit (alle Übungen)</span></div>${overallChart}</div>
+    <div class="chart-wrap"><div class="c-title"><span>Trainingsvolumen je Einheit (alle Übungen, letzte ${overallHist.length})</span></div>${overallChart}</div>
     <div class="card">
-      <div class="tiny muted" style="margin-bottom:6px">Meisttrainierte Übungen</div>
+      <div class="tiny muted" style="margin-bottom:6px">Meisttrainierte Übungen (${statsPeriod ? statsPeriod + ' Tage' : 'alle Zeit'})</div>
       ${topEx.length ? topEx.map(t => `<div class="list-row" data-ex="${t.exerciseId}">
           <div class="grow"><div class="r-title">${esc(t.name)}</div></div>
           <div class="tiny muted">${t.count}×</div></div>`).join('')
-        : `<div class="tiny muted center" style="padding:8px">Noch keine Daten.</div>`}
-    </div>`;
+        : `<div class="tiny muted center" style="padding:8px">Keine Daten in diesem Zeitraum.</div>`}
+    </div>
+  </details>`;
 
-  const volStats = DB.muscleVolumeStats(active.id, statsVolPeriod);
-  html += `<div class="section-title">Muskelgruppen-Volumen</div>
-    <div class="card">
-      <div class="btn-row" style="margin-bottom:10px">
-        <button class="btn ${statsVolPeriod === 7 ? 'primary' : 'ghost'} sm" data-vol-period="7">7 Tage</button>
-        <button class="btn ${statsVolPeriod === 30 ? 'primary' : 'ghost'} sm" data-vol-period="30">30 Tage</button>
-      </div>
-      ${volumeBarsHTML(volStats)}
-    </div>`;
+  const volStats = DB.muscleVolumeStats(active.id, statsPeriod);
+  html += `<details class="stats-acc" data-acc="volume" ${statsAccOpen.volume ? 'open' : ''}><summary>Muskelgruppen-Volumen</summary>
+    <div class="card">${volumeBarsHTML(volStats)}</div>
+  </details>`;
 
+  html += `<details class="stats-acc" data-acc="exercises" ${statsAccOpen.exercises ? 'open' : ''}><summary>Übungen</summary>`;
   list.forEach(e => {
     const pr = DB.exercisePRs(e.id, active.id);
     html += `<div class="list-row" data-ex="${e.id}">
@@ -1834,11 +1915,13 @@ route('/stats', () => {
         <div class="r-sub">${pr.sessionsCount}× · Bestes 1RM ${fmtWeight(pr.best1rm)} kg · Max ${fmtWeight(pr.maxWeight)} kg</div></div>
       <span class="arrow">›</span></div>`;
   });
+  html += `</details>`;
 
   appEl.innerHTML = html;
   wireLocationBar(appEl);
   $$('[data-ex]', appEl).forEach(n => n.onclick = () => navigate('/stats/' + n.dataset.ex));
-  $$('[data-vol-period]', appEl).forEach(n => n.onclick = () => { statsVolPeriod = parseInt(n.dataset.volPeriod); render(); });
+  $$('[data-period]', appEl).forEach(n => n.onclick = () => { statsPeriod = parseInt(n.dataset.period) || null; render(); });
+  $$('.stats-acc', appEl).forEach(d => d.addEventListener('toggle', () => { statsAccOpen[d.dataset.acc] = d.open; }));
 });
 
 function volumeBarsHTML(stats) {
@@ -1907,10 +1990,12 @@ route('/stats/:id', ({ id }) => {
 });
 
 // SVG-Liniendiagramm (ohne externe Bibliotheken)
+let chartIdCounter = 0;
 function lineChart(points, unit = '') {
   const W = 320, H = 140, pad = { l: 30, r: 10, t: 12, b: 20 };
   const pts = points.filter(p => p.y > 0);
   if (pts.length < 2) return `<div class="tiny muted center" style="padding:24px">Noch zu wenig Daten für einen Trend (mind. 2 Einheiten).</div>`;
+  const gradId = 'chart-grad-' + (chartIdCounter++); // eindeutig je Chart-Instanz - mehrere Charts auf einer Seite (z.B. /stats/:id) hätten sonst dieselbe SVG-id "grad"
   const ys = pts.map(p => p.y);
   let min = Math.min(...ys), max = Math.max(...ys);
   if (min === max) { min = min * 0.9; max = max * 1.1 || 1; }
@@ -1925,9 +2010,9 @@ function lineChart(points, unit = '') {
      <text class="chart-lbl" x="2" y="${(Y(v) + 3).toFixed(1)}">${fmtWeight(v)}</text>`).join('');
   const first = pts[0].label, lastl = pts[pts.length - 1].label;
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <defs><linearGradient id="grad" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity="0.5"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+    <defs><linearGradient id="${gradId}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity="0.5"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
     ${gridY}
-    <polygon class="chart-area" points="${area}" />
+    <polygon class="chart-area" style="fill:url(#${gradId})" points="${area}" />
     <polyline class="chart-line" points="${line}" />
     ${dots}
     <text class="chart-lbl" x="${pad.l}" y="${H - 5}">${esc(first)}</text>
@@ -2010,23 +2095,34 @@ route('/settings', () => {
       <div class="color-pick" id="s-accent-pick">
         ${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c}" class="${c === s.accentColor ? 'sel' : ''}"></button>`).join('')}
       </div>
-      <label class="field" style="margin:14px 0 0"><span>Schriftgröße</span>
-        <select id="s-fontsize">
-          <option value="small" ${s.fontSize === 'small' ? 'selected' : ''}>Klein</option>
-          <option value="medium" ${s.fontSize === 'medium' ? 'selected' : ''}>Mittel</option>
-          <option value="large" ${s.fontSize === 'large' ? 'selected' : ''}>Groß</option>
-        </select></label>
-      <label class="field" style="margin:14px 0 0;display:flex;align-items:center;gap:10px">
-        <input id="s-reduced" type="checkbox" ${s.reducedMotion ? 'checked' : ''} style="width:auto" />
-        <span style="margin:0">Animationen reduzieren</span></label>
-      <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
-        <input id="s-tagcolors" type="checkbox" ${s.tagColors ? 'checked' : ''} style="width:auto" />
-        <span style="margin:0">Farbige Muskel-/Geräte-Labels</span></label>
-      <p class="tiny muted" style="margin:8px 0 0">Muskelgruppen in Blau, Geräte-Arten in Grün – in Bibliothek und Training. Ausgeschaltet erscheinen alle Labels neutral grau.</p>
+      <div class="row2" style="margin-top:14px">
+        <label class="field"><span>Schriftgröße</span>
+          <select id="s-fontsize">
+            <option value="small" ${s.fontSize === 'small' ? 'selected' : ''}>Klein</option>
+            <option value="medium" ${s.fontSize === 'medium' ? 'selected' : ''}>Mittel</option>
+            <option value="large" ${s.fontSize === 'large' ? 'selected' : ''}>Groß</option>
+          </select></label>
+        <label class="field" style="display:flex;align-items:flex-end;gap:8px;padding-bottom:9px">
+          <input id="s-reduced" type="checkbox" ${s.reducedMotion ? 'checked' : ''} style="width:auto" />
+          <span style="margin:0">Animationen reduzieren</span></label>
+      </div>
     </div>
 
-    <div class="section-title">Training</div>
+    <div class="section-title">Übungs-Labels</div>
     <div class="card">
+      <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
+        <input id="s-tagcolors" type="checkbox" ${s.tagColors ? 'checked' : ''} style="width:auto" />
+        <span style="margin:0">Farbige Muskel-/Geräte-Labels</span></label>
+      <p class="tiny muted" style="margin:8px 0 14px">In Bibliothek und Training. Ausgeschaltet erscheinen alle Labels neutral grau (die Farben unten wirken sich dann nicht aus).</p>
+      <label class="field" style="margin:0"><span>Muskelgruppen-Farbe</span></label>
+      <div class="color-pick" id="s-musclecolor-pick">${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c}" class="${c === s.muscleColor ? 'sel' : ''}"></button>`).join('')}</div>
+      <label class="field" style="margin:14px 0 0"><span>Geräte-Farbe</span></label>
+      <div class="color-pick" id="s-equipcolor-pick">${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c}" class="${c === s.equipColor ? 'sel' : ''}"></button>`).join('')}</div>
+    </div>
+
+    <div class="section-title">Trainings-Standardwerte</div>
+    <div class="card">
+      <p class="tiny muted" style="margin-top:0">Gelten für neu angelegte Übungen im Trainingstag und für während des Trainings hinzugefügte Übungen.</p>
       <div class="row3">
         <label class="field"><span>Standard-Sätze</span><input id="s-defsets" type="number" min="1" value="${s.defaultSets}" /></label>
         <label class="field"><span>Standard-Wdh.</span><input id="s-defreps" type="number" min="1" value="${s.defaultReps}" /></label>
@@ -2038,10 +2134,14 @@ route('/settings', () => {
       <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
         <input id="s-notif" type="checkbox" ${s.restNotifications ? 'checked' : ''} style="width:auto" />
         <span style="margin:0">Browser-Benachrichtigung am Pausenende</span></label>
-      <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
+    </div>
+
+    <div class="section-title">Verhalten</div>
+    <div class="card">
+      <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
         <input id="s-diff" type="checkbox" ${s.askPlanDiff ? 'checked' : ''} style="width:auto" />
         <span style="margin:0">Nach dem Training nach Planänderungen fragen</span></label>
-      <label class="field" style="margin:12px 0 0"><span>Wochenstart im Kalender</span>
+      <label class="field" style="margin:14px 0 0"><span>Wochenstart im Kalender</span>
         <select id="s-weekstart">
           <option value="mon" ${s.weekStart === 'mon' ? 'selected' : ''}>Montag</option>
           <option value="sun" ${s.weekStart === 'sun' ? 'selected' : ''}>Sonntag</option>
@@ -2065,7 +2165,10 @@ route('/settings', () => {
         <button class="btn" id="impBtn">⬆ Importieren</button>
       </div>
       <input type="file" id="impFile" accept="application/json,.json" hidden />
-      <hr class="sep" />
+    </div>
+
+    <div class="section-title">Beispieldaten</div>
+    <div class="card">
       <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
         <input id="s-demo" type="checkbox" ${s.demoDataEnabled ? 'checked' : ''} style="width:auto" />
         <span style="margin:0">Beispieldaten (ca. 2 Monate Testtrainings)</span></label>
@@ -2099,6 +2202,14 @@ route('/settings', () => {
   $('#s-fontsize', appEl).onchange = e => { s.fontSize = e.target.value; DB.save(); applyDisplaySettings(); };
   $('#s-reduced', appEl).onchange = e => { s.reducedMotion = e.target.checked; DB.save(); applyDisplaySettings(); };
   $('#s-tagcolors', appEl).onchange = e => { s.tagColors = e.target.checked; DB.save(); };
+  $$('#s-musclecolor-pick button', appEl).forEach(b => b.onclick = () => {
+    s.muscleColor = b.dataset.c; DB.save(); applyDisplaySettings();
+    $$('#s-musclecolor-pick button', appEl).forEach(x => x.classList.remove('sel')); b.classList.add('sel');
+  });
+  $$('#s-equipcolor-pick button', appEl).forEach(b => b.onclick = () => {
+    s.equipColor = b.dataset.c; DB.save(); applyDisplaySettings();
+    $$('#s-equipcolor-pick button', appEl).forEach(x => x.classList.remove('sel')); b.classList.add('sel');
+  });
 
   $('#s-defsets', appEl).onchange = e => { s.defaultSets = Math.max(1, parseInt(e.target.value) || 1); DB.save(); };
   $('#s-defreps', appEl).onchange = e => { s.defaultReps = Math.max(1, parseInt(e.target.value) || 1); DB.save(); };

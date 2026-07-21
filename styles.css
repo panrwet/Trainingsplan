@@ -313,8 +313,8 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 /* ---------- Muskel-/Geräte-Labels ---------- */
 .tag-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .tag-badge { font-size: .72rem; font-weight: 650; padding: 2px 9px; border-radius: 999px; }
-.tag-badge.muscle { background: rgba(125, 211, 252, .16); color: #7dd3fc; }
-.tag-badge.equip { background: rgba(134, 239, 172, .16); color: #86efac; }
+.tag-badge.muscle { background: var(--muscle-bg, rgba(125, 211, 252, .16)); color: var(--muscle-color, #7dd3fc); }
+.tag-badge.equip { background: var(--equip-bg, rgba(134, 239, 172, .16)); color: var(--equip-color, #86efac); }
 .tag-badge.neutral { background: var(--bg-elev2); color: var(--text-dim); border: 1px solid var(--border); }
 
 /* ---------- Rest timer ---------- */
@@ -379,7 +379,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 .chart-wrap .c-title { font-size: .82rem; color: var(--text-dim); font-weight: 650; margin-bottom: 8px; display:flex; justify-content: space-between; }
 svg.chart { width: 100%; height: 140px; display: block; }
 .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; }
-.chart-area { fill: url(#grad); opacity: .18; }
+.chart-area { opacity: .18; }
 .chart-dot { fill: var(--accent); }
 .chart-grid { stroke: var(--border); stroke-width: 1; }
 .chart-lbl { fill: var(--text-dim2); font-size: 9px; }
@@ -468,6 +468,17 @@ a { color: var(--accent); }
 .plan-acc[open] .acc-chevron { transform: rotate(180deg); }
 .plan-acc-body { padding: 0 10px 10px; }
 .plan-acc-body .list-row:last-child { margin-bottom: 0; }
+
+/* ---------- Statistik: auf-/zuklappbare Abschnitte (wie section-title, nur klickbar) ---------- */
+.stats-acc { margin: 0; }
+.stats-acc summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+  margin: 14px 2px 6px; font-size: .74rem; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-dim2); font-weight: 700;
+}
+.stats-acc summary::-webkit-details-marker { display: none; }
+.stats-acc summary::after { content: '⌄'; font-size: 1rem; transition: transform .15s; }
+.stats-acc[open] summary::after { transform: rotate(180deg); }
 
 /* ---------- Trainings-Anpassungen nach dem Training (Diff-Modal) ---------- */
 .diff-list { display: flex; flex-direction: column; gap: 2px; }

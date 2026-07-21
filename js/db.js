@@ -27,6 +27,7 @@ const DEFAULTS = () => ({
     weekStart: 'mon', askPlanDiff: true, restNotifications: false,
     // Anzeige/Design
     tagColors: true, theme: 'dark', accentColor: '#6c8cff', fontSize: 'medium', reducedMotion: false,
+    muscleColor: '#7dd3fc', equipColor: '#86efac',
     // Daten
     backupReminderWeeks: 0, lastBackupAt: null, demoDataEnabled: false,
     // intern
@@ -218,6 +219,7 @@ export function getActiveLocationId() {
   if (!id || !d.locations.some(l => l.id === id)) {
     id = d.locations.length ? d.locations[0].id : null;
     d.settings.activeLocationId = id;
+    save();
   }
   return id;
 }
@@ -265,7 +267,7 @@ export function copyPlanToLocation(planId, targetLocationId) {
   const newPlan = addPlan({ name: p.name, emoji: p.emoji, color: p.color, locationId: targetLocationId });
   daysByPlan(planId).forEach(day => {
     const newDay = addDay({ name: day.name, emoji: day.emoji, color: day.color, planId: newPlan.id });
-    day.exercises.forEach(item => addExerciseToDay(newDay.id, item.exerciseId, { sets: item.sets, reps: item.reps, restSec: item.restSec }));
+    day.exercises.forEach(item => addExerciseToDay(newDay.id, item.exerciseId, { sets: item.sets, reps: item.reps, restSec: item.restSec, groupId: item.groupId || null }));
   });
   return newPlan;
 }
@@ -527,7 +529,7 @@ export function applyPlanDiffs(sessionId, changes) {
       applied++;
     } else if (ch.type === 'exerciseAdded') {
       if (!day.exercises.some(x => x.exerciseId === ch.exerciseId)) {
-        day.exercises.push({ id: uid('de'), exerciseId: ch.exerciseId, sets: ch.sets, reps: ch.reps, restSec: ch.restSec });
+        day.exercises.push({ id: uid('de'), exerciseId: ch.exerciseId, sets: ch.sets, reps: ch.reps, restSec: ch.restSec, groupId: null });
         applied++;
       }
     } else if (ch.type === 'exerciseRemoved') {
@@ -656,11 +658,19 @@ export function exercisesTrainedAtLocation(locationId) {
   return exercises().filter(e => ids.has(e.id));
 }
 
-// Trainingsvolumen je Muskelgruppe über einen Zeitraum (Standard: letzte 7 Tage),
-// optional auf einen Ort beschränkt. Summiert über ALLE Übungen, die die
-// jeweilige Muskelgruppe als Tag tragen (eine Übung kann in mehrere einzahlen).
+// Gemeinsamer Zeitraum-Filter für die Gesamt-Übersicht + Muskelgruppen-Volumen auf
+// der Statistik-Seite - EIN Umschalter (7/30 Tage/Alle) statt mehrerer unabhängiger,
+// damit die Zahlen dort konsistent zum selben Zeitraum gehören. `periodDays` null
+// bzw. 0 bedeutet "alle Zeit" (kein unterer Cutoff).
+function periodCutoff(periodDays) {
+  return periodDays ? Date.now() - periodDays * 86400000 : -Infinity;
+}
+
+// Trainingsvolumen je Muskelgruppe über den gewählten Zeitraum, optional auf einen
+// Ort beschränkt. Summiert über ALLE Übungen, die die jeweilige Muskelgruppe als
+// Tag tragen (eine Übung kann in mehrere einzahlen).
 export function muscleVolumeStats(locationId = null, periodDays = 7) {
-  const cutoff = Date.now() - periodDays * 86400000;
+  const cutoff = periodCutoff(periodDays);
   const totals = {};
   for (const s of db().sessions) {
     if (locationId && s.locationId !== locationId) continue;
@@ -680,6 +690,8 @@ export function muscleVolumeStats(locationId = null, periodDays = 7) {
 // ---------- Gesamt-Statistik (übungsübergreifend, je Ort) ----------
 // Gesamt-Trainingsvolumen je abgeschlossener Einheit (alle Übungen zusammen),
 // chronologisch aufsteigend - für den Gesamt-Trend-Chart auf der Statistik-Seite.
+// Bewusst NICHT auf den Zeitraum-Filter beschränkt (zeigt den Trend über die
+// letzten `limit` Einheiten, unabhängig vom 7/30-Tage/Alle-Umschalter).
 export function overallVolumeHistory(locationId = null, limit = 26) {
   const rows = [];
   for (const s of db().sessions) {
@@ -696,30 +708,21 @@ export function overallVolumeHistory(locationId = null, limit = 26) {
   return rows.slice(-limit);
 }
 
-// Trainingshäufigkeit je Woche über die letzten `weeks` Wochen (Woche 0 = die aktuelle).
-export function weeklyFrequency(locationId = null, weeks = 8) {
-  const now = Date.now();
-  const buckets = [];
-  for (let i = weeks - 1; i >= 0; i--) {
-    const start = now - (i + 1) * 7 * 86400000;
-    const end = now - i * 7 * 86400000;
-    let count = 0;
-    for (const s of db().sessions) {
-      if (locationId && s.locationId !== locationId) continue;
-      if (!s.finishedAt) continue;
-      if (s.finishedAt >= start && s.finishedAt < end) count++;
-    }
-    buckets.push({ weekIndex: i, count });
-  }
-  return buckets;
+// Anzahl abgeschlossener Einheiten im gewählten Zeitraum (Gegenstück zur
+// All-Time-Zahl "Trainings gesamt" auf der Statistik-Seite).
+export function sessionCountInPeriod(locationId = null, periodDays = null) {
+  const cutoff = periodCutoff(periodDays);
+  return db().sessions.filter(s => s.finishedAt && s.finishedAt >= cutoff && (!locationId || s.locationId === locationId)).length;
 }
 
-// Meisttrainierte Übungen nach Häufigkeit (Anzahl Einheiten mit abgehaktem Satz).
-export function topExercisesByFrequency(locationId = null, limit = 5) {
+// Meisttrainierte Übungen nach Häufigkeit (Anzahl Einheiten mit abgehaktem Satz)
+// im gewählten Zeitraum.
+export function topExercisesByFrequency(locationId = null, periodDays = null, limit = 5) {
+  const cutoff = periodCutoff(periodDays);
   const counts = new Map();
   for (const s of db().sessions) {
     if (locationId && s.locationId !== locationId) continue;
-    if (!s.finishedAt) continue;
+    if (!s.finishedAt || s.finishedAt < cutoff) continue;
     (s.entries || []).forEach(e => {
       if ((e.sets || []).some(isWorkingDone)) counts.set(e.exerciseId, (counts.get(e.exerciseId) || 0) + 1);
     });
