@@ -742,7 +742,7 @@ route('/day/:id', ({ id }) => {
     });
     appEl.append(el('button', { class: 'fab', onclick: () => pickExerciseModal(exId => {
       DB.addExerciseToDay(id, exId); render();
-    }) }, '+'));
+    }, day.exercises.map(x => x.exerciseId)) }, '+'));
   }
   draw();
 });
@@ -801,8 +801,9 @@ function editDayExerciseModal(dayId, itemId) {
 // ============================================================
 //  Übungs-Auswahl / Bibliothek
 // ============================================================
-function pickExerciseModal(onPick) {
+function pickExerciseModal(onPick, excludeIds = []) {
   const list = DB.exercises();
+  const excludeSet = new Set(excludeIds);
   const body = `
     <input id="f-search" placeholder="Übung suchen …" style="margin-bottom:10px" />
     <button class="btn primary block" id="newEx" style="margin-bottom:12px">+ Neue Übung anlegen</button>
@@ -814,10 +815,14 @@ function pickExerciseModal(onPick) {
       const listEl = $('#exList', m);
       const draw = (q = '') => {
         const items = list.filter(e => e.name.toLowerCase().includes(q.toLowerCase()));
-        listEl.innerHTML = items.length ? items.map(e =>
-          `<div class="list-row" data-pick="${e.id}"><div class="grow"><div class="r-title">${esc(e.name)}</div>
-            ${tagBadgesHTML(e)}</div><span class="arrow">＋</span></div>`
-        ).join('') : `<div class="tiny muted center" style="padding:12px">Keine Übung gefunden.</div>`;
+        listEl.innerHTML = items.length ? items.map(e => {
+          const dup = excludeSet.has(e.id);
+          return `<div class="list-row ${dup ? 'disabled' : ''}" ${dup ? '' : `data-pick="${e.id}"`}>
+            <div class="grow"><div class="r-title">${esc(e.name)}</div>
+              ${tagBadgesHTML(e)}
+              ${dup ? '<div class="tiny muted">Bereits in diesem Trainingstag</div>' : ''}</div>
+            <span class="arrow">${dup ? '' : '＋'}</span></div>`;
+        }).join('') : `<div class="tiny muted center" style="padding:12px">Keine Übung gefunden.</div>`;
         $$('[data-pick]', listEl).forEach(n => n.onclick = () => { close(); onPick(n.dataset.pick); });
       };
       draw();
@@ -1221,7 +1226,7 @@ function trainSettingsModal(s, container, id) {
           for (let i = 0; i < cfg.defaultSets; i++) sets.push({ weight: '', reps: '', done: false });
           s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: cfg.defaultReps, targetSets: cfg.defaultSets, restSec: cfg.defaultRestSec, groupId: null, sets });
           DB.save(); renderTrain(container, id);
-        });
+        }, s.entries.map(e => e.exerciseId));
       };
       $('[data-act="color"]', m).onclick = () => { close(); trainColorModal(s, container, id); };
       const editday = $('[data-act="editday"]', m);
@@ -1518,7 +1523,7 @@ function renderExerciseBlock(s, id, container, ei) {
       entry.unit = newEx?.unit || 'kg';
       entry.sets = Array.from({ length: setCount }, () => ({ weight: '', reps: '', done: false }));
       DB.save(); renderEntries(container, id);
-    }),
+    }, s.entries.filter((e2, i2) => i2 !== ei).map(e2 => e2.exerciseId)),
     onRemoveExercise: async () => {
       if (await confirmDialog('Übung aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
         s.entries.splice(ei, 1); DB.save(); renderEntries(container, id);
@@ -1841,7 +1846,7 @@ function dayDetailModal(dateKey, evs) {
 // ============================================================
 //  Ansicht: Statistik
 // ============================================================
-let statsPeriod = 7; // 7 | 30 | null (Alle) - EIN Umschalter für Gesamt-Übersicht + Muskelgruppen-Volumen
+let statsPeriod = 7; // 7 | 30 | null (Alle) - EIN Umschalter für Gesamt-Übersicht + Muskelgruppen-Sätze
 // Auf-/zugeklappt-Zustand der Statistik-Abschnitte - modulglobal, damit ein Klick auf
 // den Zeitraum-Umschalter (voller render()) den Zustand nicht zurücksetzt.
 let statsAccOpen = { overview: true, volume: false, exercises: true };
@@ -1871,7 +1876,7 @@ route('/stats', () => {
     return;
   }
 
-  // Ein gemeinsamer Zeitraum-Umschalter für Gesamt-Übersicht + Muskelgruppen-Volumen,
+  // Ein gemeinsamer Zeitraum-Umschalter für Gesamt-Übersicht + Muskelgruppen-Sätze,
   // damit beide Sektionen konsistent zum selben Zeitraum gehören (statt zwei getrennte,
   // evtl. unterschiedlich eingestellte Filter zu haben).
   const periodBar = `<div class="btn-row" style="margin-bottom:12px">
@@ -1903,8 +1908,11 @@ route('/stats', () => {
   </details>`;
 
   const volStats = DB.muscleVolumeStats(active.id, statsPeriod);
-  html += `<details class="stats-acc" data-acc="volume" ${statsAccOpen.volume ? 'open' : ''}><summary>Muskelgruppen-Volumen</summary>
-    <div class="card">${volumeBarsHTML(volStats)}</div>
+  html += `<details class="stats-acc" data-acc="volume" ${statsAccOpen.volume ? 'open' : ''}><summary>Muskelgruppen-Sätze</summary>
+    <div class="card">
+      <p class="tiny muted" style="margin-top:0">Zählt abgehakte Sätze je Muskelgruppe (nicht Gewicht) – aussagekräftiger für den Trainingsreiz.</p>
+      ${volumeBarsHTML(volStats)}
+    </div>
   </details>`;
 
   html += `<details class="stats-acc" data-acc="exercises" ${statsAccOpen.exercises ? 'open' : ''}><summary>Übungen</summary>`;
@@ -1926,11 +1934,11 @@ route('/stats', () => {
 
 function volumeBarsHTML(stats) {
   if (!stats.length) return `<div class="tiny muted center" style="padding:12px">Keine Trainingsdaten in diesem Zeitraum.</div>`;
-  const max = Math.max(...stats.map(s => s.volume));
+  const max = Math.max(...stats.map(s => s.sets));
   return stats.map(s => `<div class="vol-row">
     <div class="vol-label">${esc(s.muscle)}</div>
-    <div class="vol-bar-track"><div class="vol-bar-fill" style="width:${max ? Math.round(s.volume / max * 100) : 0}%"></div></div>
-    <div class="vol-val">${fmtWeight(s.volume)}</div>
+    <div class="vol-bar-track"><div class="vol-bar-fill" style="width:${max ? Math.round(s.sets / max * 100) : 0}%"></div></div>
+    <div class="vol-val">${s.sets}×</div>
   </div>`).join('');
 }
 

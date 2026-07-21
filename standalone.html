@@ -163,6 +163,8 @@ html, body {
 .list-row .grow .r-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .95rem; }
 .list-row .grow .r-sub { color: var(--text-dim); font-size: .8rem; margin-top: 1px; }
 .list-row .arrow { color: var(--text-dim2); font-size: 1.2rem; }
+.list-row.disabled { cursor: default; opacity: .5; }
+.list-row.disabled:active { background: var(--bg-elev); }
 
 .section-title {
   font-size: .74rem; text-transform: uppercase; letter-spacing: .06em;
@@ -1125,11 +1127,14 @@ function epley1RM(weight, reps) {
 }
 
 // ---------- Statistik je Übung ----------
-// Liefert je Einheit (chronologisch aufsteigend) aggregierte Kennzahlen.
-// Optional auf einen Ort beschränkt -> getrennte Statistik je Gym.
+// Liefert je ABGESCHLOSSENER Einheit (chronologisch aufsteigend) aggregierte
+// Kennzahlen. Optional auf einen Ort beschränkt -> getrennte Statistik je Gym.
+// Läuft eine Einheit noch (nicht "beendet"), zählt sie hier noch nicht mit -
+// konsistent mit den Gesamt-Statistiken, die dasselbe verlangen.
 function exerciseHistory(exerciseId, locationId = null) {
   const rows = [];
   for (const s of db().sessions) {
+    if (!s.finishedAt) continue;
     if (locationId && s.locationId !== locationId) continue;
     const entries = (s.entries || []).filter(e => e.exerciseId === exerciseId);
     if (!entries.length) continue;
@@ -1176,10 +1181,13 @@ function exercisePRs(exerciseId, locationId = null) {
   return pr;
 }
 
-// Übungen, die an einem Ort tatsächlich trainiert wurden (mit abgehakten Sätzen)
+// Übungen, die an einem Ort tatsächlich trainiert wurden (abgehakte Sätze in
+// ABGESCHLOSSENEN Einheiten - konsistent mit den anderen Statistik-Funktionen,
+// ein laufendes/nicht beendetes Training zählt hier bewusst noch nicht mit).
 function exercisesTrainedAtLocation(locationId) {
   const ids = new Set();
   for (const s of db().sessions) {
+    if (!s.finishedAt) continue;
     if (locationId && s.locationId !== locationId) continue;
     (s.entries || []).forEach(e => { if ((e.sets || []).some(isWorkingDone)) ids.add(e.exerciseId); });
   }
@@ -1195,8 +1203,12 @@ function periodCutoff(periodDays) {
 }
 
 // Trainingsvolumen je Muskelgruppe über den gewählten Zeitraum, optional auf einen
-// Ort beschränkt. Summiert über ALLE Übungen, die die jeweilige Muskelgruppe als
-// Tag tragen (eine Übung kann in mehrere einzahlen).
+// Ort beschränkt. Zählt ABGEHAKTE SÄTZE (nicht Gewicht × Wdh.) je Muskelgruppe, die
+// die jeweilige Übung als Tag trägt (eine Übung kann in mehrere einzahlen) - "Sätze
+// pro Muskel pro Woche" ist die in der Trainingswissenschaft übliche Volumen-Einheit
+// (Schoenfeld u.a.), weil Gewicht×Wdh. je nach Übung/Hebelverhältnis nicht vergleichbar
+// ist (ein Satz Bizepscurls wiegt naturgemäß viel weniger als ein Satz Kniebeuge,
+// sagt aber nichts darüber aus, welcher Muskel mehr Trainingsreiz bekommen hat).
 function muscleVolumeStats(locationId = null, periodDays = 7) {
   const cutoff = periodCutoff(periodDays);
   const totals = {};
@@ -1206,13 +1218,12 @@ function muscleVolumeStats(locationId = null, periodDays = 7) {
     for (const entry of s.entries || []) {
       const ex = getExercise(entry.exerciseId);
       if (!ex || !ex.muscles || !ex.muscles.length) continue;
-      let vol = 0;
-      (entry.sets || []).forEach(set => { if (isWorkingDone(set)) vol += num(set.weight) * num(set.reps); });
-      if (!vol) continue;
-      ex.muscles.forEach(m => { totals[m] = (totals[m] || 0) + vol; });
+      const doneSets = (entry.sets || []).filter(isWorkingDone).length;
+      if (!doneSets) continue;
+      ex.muscles.forEach(m => { totals[m] = (totals[m] || 0) + doneSets; });
     }
   }
-  return Object.entries(totals).map(([muscle, volume]) => ({ muscle, volume: Math.round(volume) })).sort((a, b) => b.volume - a.volume);
+  return Object.entries(totals).map(([muscle, sets]) => ({ muscle, sets })).sort((a, b) => b.sets - a.sets);
 }
 
 // ---------- Gesamt-Statistik (übungsübergreifend, je Ort) ----------
@@ -2137,7 +2148,7 @@ route('/day/:id', ({ id }) => {
     });
     appEl.append(el('button', { class: 'fab', onclick: () => pickExerciseModal(exId => {
       DB.addExerciseToDay(id, exId); render();
-    }) }, '+'));
+    }, day.exercises.map(x => x.exerciseId)) }, '+'));
   }
   draw();
 });
@@ -2196,8 +2207,9 @@ function editDayExerciseModal(dayId, itemId) {
 // ============================================================
 //  Übungs-Auswahl / Bibliothek
 // ============================================================
-function pickExerciseModal(onPick) {
+function pickExerciseModal(onPick, excludeIds = []) {
   const list = DB.exercises();
+  const excludeSet = new Set(excludeIds);
   const body = `
     <input id="f-search" placeholder="Übung suchen …" style="margin-bottom:10px" />
     <button class="btn primary block" id="newEx" style="margin-bottom:12px">+ Neue Übung anlegen</button>
@@ -2209,10 +2221,14 @@ function pickExerciseModal(onPick) {
       const listEl = $('#exList', m);
       const draw = (q = '') => {
         const items = list.filter(e => e.name.toLowerCase().includes(q.toLowerCase()));
-        listEl.innerHTML = items.length ? items.map(e =>
-          `<div class="list-row" data-pick="${e.id}"><div class="grow"><div class="r-title">${esc(e.name)}</div>
-            ${tagBadgesHTML(e)}</div><span class="arrow">＋</span></div>`
-        ).join('') : `<div class="tiny muted center" style="padding:12px">Keine Übung gefunden.</div>`;
+        listEl.innerHTML = items.length ? items.map(e => {
+          const dup = excludeSet.has(e.id);
+          return `<div class="list-row ${dup ? 'disabled' : ''}" ${dup ? '' : `data-pick="${e.id}"`}>
+            <div class="grow"><div class="r-title">${esc(e.name)}</div>
+              ${tagBadgesHTML(e)}
+              ${dup ? '<div class="tiny muted">Bereits in diesem Trainingstag</div>' : ''}</div>
+            <span class="arrow">${dup ? '' : '＋'}</span></div>`;
+        }).join('') : `<div class="tiny muted center" style="padding:12px">Keine Übung gefunden.</div>`;
         $$('[data-pick]', listEl).forEach(n => n.onclick = () => { close(); onPick(n.dataset.pick); });
       };
       draw();
@@ -2616,7 +2632,7 @@ function trainSettingsModal(s, container, id) {
           for (let i = 0; i < cfg.defaultSets; i++) sets.push({ weight: '', reps: '', done: false });
           s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: cfg.defaultReps, targetSets: cfg.defaultSets, restSec: cfg.defaultRestSec, groupId: null, sets });
           DB.save(); renderTrain(container, id);
-        });
+        }, s.entries.map(e => e.exerciseId));
       };
       $('[data-act="color"]', m).onclick = () => { close(); trainColorModal(s, container, id); };
       const editday = $('[data-act="editday"]', m);
@@ -2913,7 +2929,7 @@ function renderExerciseBlock(s, id, container, ei) {
       entry.unit = newEx?.unit || 'kg';
       entry.sets = Array.from({ length: setCount }, () => ({ weight: '', reps: '', done: false }));
       DB.save(); renderEntries(container, id);
-    }),
+    }, s.entries.filter((e2, i2) => i2 !== ei).map(e2 => e2.exerciseId)),
     onRemoveExercise: async () => {
       if (await confirmDialog('Übung aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
         s.entries.splice(ei, 1); DB.save(); renderEntries(container, id);
@@ -3236,7 +3252,7 @@ function dayDetailModal(dateKey, evs) {
 // ============================================================
 //  Ansicht: Statistik
 // ============================================================
-let statsPeriod = 7; // 7 | 30 | null (Alle) - EIN Umschalter für Gesamt-Übersicht + Muskelgruppen-Volumen
+let statsPeriod = 7; // 7 | 30 | null (Alle) - EIN Umschalter für Gesamt-Übersicht + Muskelgruppen-Sätze
 // Auf-/zugeklappt-Zustand der Statistik-Abschnitte - modulglobal, damit ein Klick auf
 // den Zeitraum-Umschalter (voller render()) den Zustand nicht zurücksetzt.
 let statsAccOpen = { overview: true, volume: false, exercises: true };
@@ -3266,7 +3282,7 @@ route('/stats', () => {
     return;
   }
 
-  // Ein gemeinsamer Zeitraum-Umschalter für Gesamt-Übersicht + Muskelgruppen-Volumen,
+  // Ein gemeinsamer Zeitraum-Umschalter für Gesamt-Übersicht + Muskelgruppen-Sätze,
   // damit beide Sektionen konsistent zum selben Zeitraum gehören (statt zwei getrennte,
   // evtl. unterschiedlich eingestellte Filter zu haben).
   const periodBar = `<div class="btn-row" style="margin-bottom:12px">
@@ -3298,8 +3314,11 @@ route('/stats', () => {
   </details>`;
 
   const volStats = DB.muscleVolumeStats(active.id, statsPeriod);
-  html += `<details class="stats-acc" data-acc="volume" ${statsAccOpen.volume ? 'open' : ''}><summary>Muskelgruppen-Volumen</summary>
-    <div class="card">${volumeBarsHTML(volStats)}</div>
+  html += `<details class="stats-acc" data-acc="volume" ${statsAccOpen.volume ? 'open' : ''}><summary>Muskelgruppen-Sätze</summary>
+    <div class="card">
+      <p class="tiny muted" style="margin-top:0">Zählt abgehakte Sätze je Muskelgruppe (nicht Gewicht) – aussagekräftiger für den Trainingsreiz.</p>
+      ${volumeBarsHTML(volStats)}
+    </div>
   </details>`;
 
   html += `<details class="stats-acc" data-acc="exercises" ${statsAccOpen.exercises ? 'open' : ''}><summary>Übungen</summary>`;
@@ -3321,11 +3340,11 @@ route('/stats', () => {
 
 function volumeBarsHTML(stats) {
   if (!stats.length) return `<div class="tiny muted center" style="padding:12px">Keine Trainingsdaten in diesem Zeitraum.</div>`;
-  const max = Math.max(...stats.map(s => s.volume));
+  const max = Math.max(...stats.map(s => s.sets));
   return stats.map(s => `<div class="vol-row">
     <div class="vol-label">${esc(s.muscle)}</div>
-    <div class="vol-bar-track"><div class="vol-bar-fill" style="width:${max ? Math.round(s.volume / max * 100) : 0}%"></div></div>
-    <div class="vol-val">${fmtWeight(s.volume)}</div>
+    <div class="vol-bar-track"><div class="vol-bar-fill" style="width:${max ? Math.round(s.sets / max * 100) : 0}%"></div></div>
+    <div class="vol-val">${s.sets}×</div>
   </div>`).join('');
 }
 

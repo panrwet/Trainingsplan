@@ -597,11 +597,14 @@ export function epley1RM(weight, reps) {
 }
 
 // ---------- Statistik je Übung ----------
-// Liefert je Einheit (chronologisch aufsteigend) aggregierte Kennzahlen.
-// Optional auf einen Ort beschränkt -> getrennte Statistik je Gym.
+// Liefert je ABGESCHLOSSENER Einheit (chronologisch aufsteigend) aggregierte
+// Kennzahlen. Optional auf einen Ort beschränkt -> getrennte Statistik je Gym.
+// Läuft eine Einheit noch (nicht "beendet"), zählt sie hier noch nicht mit -
+// konsistent mit den Gesamt-Statistiken, die dasselbe verlangen.
 export function exerciseHistory(exerciseId, locationId = null) {
   const rows = [];
   for (const s of db().sessions) {
+    if (!s.finishedAt) continue;
     if (locationId && s.locationId !== locationId) continue;
     const entries = (s.entries || []).filter(e => e.exerciseId === exerciseId);
     if (!entries.length) continue;
@@ -648,10 +651,13 @@ export function exercisePRs(exerciseId, locationId = null) {
   return pr;
 }
 
-// Übungen, die an einem Ort tatsächlich trainiert wurden (mit abgehakten Sätzen)
+// Übungen, die an einem Ort tatsächlich trainiert wurden (abgehakte Sätze in
+// ABGESCHLOSSENEN Einheiten - konsistent mit den anderen Statistik-Funktionen,
+// ein laufendes/nicht beendetes Training zählt hier bewusst noch nicht mit).
 export function exercisesTrainedAtLocation(locationId) {
   const ids = new Set();
   for (const s of db().sessions) {
+    if (!s.finishedAt) continue;
     if (locationId && s.locationId !== locationId) continue;
     (s.entries || []).forEach(e => { if ((e.sets || []).some(isWorkingDone)) ids.add(e.exerciseId); });
   }
@@ -667,8 +673,12 @@ function periodCutoff(periodDays) {
 }
 
 // Trainingsvolumen je Muskelgruppe über den gewählten Zeitraum, optional auf einen
-// Ort beschränkt. Summiert über ALLE Übungen, die die jeweilige Muskelgruppe als
-// Tag tragen (eine Übung kann in mehrere einzahlen).
+// Ort beschränkt. Zählt ABGEHAKTE SÄTZE (nicht Gewicht × Wdh.) je Muskelgruppe, die
+// die jeweilige Übung als Tag trägt (eine Übung kann in mehrere einzahlen) - "Sätze
+// pro Muskel pro Woche" ist die in der Trainingswissenschaft übliche Volumen-Einheit
+// (Schoenfeld u.a.), weil Gewicht×Wdh. je nach Übung/Hebelverhältnis nicht vergleichbar
+// ist (ein Satz Bizepscurls wiegt naturgemäß viel weniger als ein Satz Kniebeuge,
+// sagt aber nichts darüber aus, welcher Muskel mehr Trainingsreiz bekommen hat).
 export function muscleVolumeStats(locationId = null, periodDays = 7) {
   const cutoff = periodCutoff(periodDays);
   const totals = {};
@@ -678,13 +688,12 @@ export function muscleVolumeStats(locationId = null, periodDays = 7) {
     for (const entry of s.entries || []) {
       const ex = getExercise(entry.exerciseId);
       if (!ex || !ex.muscles || !ex.muscles.length) continue;
-      let vol = 0;
-      (entry.sets || []).forEach(set => { if (isWorkingDone(set)) vol += num(set.weight) * num(set.reps); });
-      if (!vol) continue;
-      ex.muscles.forEach(m => { totals[m] = (totals[m] || 0) + vol; });
+      const doneSets = (entry.sets || []).filter(isWorkingDone).length;
+      if (!doneSets) continue;
+      ex.muscles.forEach(m => { totals[m] = (totals[m] || 0) + doneSets; });
     }
   }
-  return Object.entries(totals).map(([muscle, volume]) => ({ muscle, volume: Math.round(volume) })).sort((a, b) => b.volume - a.volume);
+  return Object.entries(totals).map(([muscle, sets]) => ({ muscle, sets })).sort((a, b) => b.sets - a.sets);
 }
 
 // ---------- Gesamt-Statistik (übungsübergreifend, je Ort) ----------

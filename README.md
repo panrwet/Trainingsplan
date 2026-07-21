@@ -19,7 +19,7 @@ Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – instal
 - **Sätze, Pausen, Reihenfolge, Zirkel & Übungen anpassbar** – beim Erstellen des Plans **und** während des Trainings. Nach dem Training wird, sofern in den Einstellungen aktiviert, **je Änderung einzeln gefragt**, ob sie in den Trainingsplan übernommen werden soll (neue Pausenzeit, mehr/weniger Sätze, hinzugefügte/entfernte Übung, geänderte Reihenfolge, angepasste Zirkel-Gruppierung) – oder nur für diese eine Einheit gilt.
 - **Pausen-Timer** – Countdown nach jedem abgehakten Satz (mit Ton/Vibration und optionaler Browser-Benachrichtigung, wenn die App gerade im Hintergrund ist), hält währenddessen den **Bildschirm wach** (Wake Lock, wo vom Browser unterstützt).
 - **Notizen** je Trainingseinheit (gesamtes Training) zusätzlich zu den Geräte-Notizen je Übung.
-- **Statistiken je Übung** – geschätztes 1RM (Epley), max. Gewicht, Volumen, persönliche Rekorde und ein Verlaufs-Chart, je Ort getrennt. Zusätzlich eine **Gesamt-Übersicht** (Trainings gesamt, Einheiten im Zeitraum, Trainingsvolumen-Trend über alle Übungen, meisttrainierte Übungen) sowie eine **Muskelgruppen-Volumen-Auswertung**, beide über einen gemeinsamen Zeitraum-Umschalter (7/30 Tage/Alle) – alle drei Abschnitte auf-/zuklappbar.
+- **Statistiken je Übung** – geschätztes 1RM (Epley), max. Gewicht, Volumen, persönliche Rekorde und ein Verlaufs-Chart, je Ort getrennt. Zusätzlich eine **Gesamt-Übersicht** (Trainings gesamt, Einheiten im Zeitraum, Trainingsvolumen-Trend über alle Übungen, meisttrainierte Übungen) sowie **Muskelgruppen-Sätze** (abgehakte Sätze je Muskelgruppe – Sätze statt Gewicht, weil das aussagekräftiger für den Trainingsreiz ist), beide über einen gemeinsamen Zeitraum-Umschalter (7/30 Tage/Alle) – alle drei Abschnitte auf-/zuklappbar.
 - **Beispieldaten** – über *Einstellungen → Daten & Backup* an-/abschaltbar: erzeugt bzw. entfernt ca. 2 Monate plausibler Testtrainings am aktiven Ort, um Statistik & Kalender direkt auszuprobieren, ohne echte Daten zu verändern.
 - **Kalender / Habit-Tracker** – jeder Trainingstag & Plan bekommt ein **Kürzel oder Emoji**, das im Monatskalender erscheint. Plus Wochen-Streak und eine Liste der **letzten Trainings** darunter.
 - **Globale Suche** – über das 🔍-Symbol auf der Pläne-Seite, findet Pläne, Trainingstage, Übungen und vergangene Trainings.
@@ -33,7 +33,8 @@ Für Krafttraining sind das die aussagekräftigsten Kennzahlen:
 
 - **Geschätztes 1RM (Epley: `Gewicht × (1 + Wdh/30)`)** – der beste Einzelindikator für Kraftfortschritt, unabhängig vom Wiederholungsbereich.
 - **Max. Gewicht** – klassischer Fortschrittsmarker.
-- **Volumen (Sätze × Wdh × Gewicht)** – Indikator für Trainingsreiz/Arbeitsumfang.
+- **Volumen (Sätze × Wdh × Gewicht)** – je Übung ein guter Fortschritts-Indikator, da hier immer dieselbe Übung mit sich selbst verglichen wird.
+- **Muskelgruppen-Sätze (Anzahl statt Gewicht)** – *über Übungen hinweg* ist Gewicht × Wdh. dagegen nicht vergleichbar (ein Satz Kniebeuge wiegt naturgemäß mehr als ein Satz Bizepscurls, sagt aber nichts über den Trainingsreiz je Muskel aus). Trainingswissenschaftlich üblich ist daher „Sätze pro Muskel" (u. a. Schoenfeld-Metaanalysen), das zählt die App entsprechend.
 - **Persönliche Rekorde & Häufigkeit** – Motivation und Übersicht.
 
 ## Wie & wo werden die Daten gespeichert?
