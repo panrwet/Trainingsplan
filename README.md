@@ -11,15 +11,19 @@ Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – instal
 - **Hierarchie:** **Ort** (z. B. Sports Club Kiel, Zuhause) → **Trainingsplan** → **Trainingstag** → **Übungen**
 - **Orte oben als Reiter** – der aktive Ort filtert die ganze App. Tippen auf den **bereits aktiven** Reiter öffnet dessen Bearbeiten-Dialog (Name/Emoji/Farbe/Löschen); Tippen auf einen anderen Reiter wechselt dorthin. **Statistik, „letztes Mal" und Verlauf sind je Ort getrennt**, weil Geräte zwischen Gyms nicht vergleichbar sind (z. B. Brustpresse 80 kg in Gym A ≙ 50 kg in Gym B). Das Orts-Kürzel steht klein neben Plan/Trainingstag/Übung.
 - **Pläne ist die Startseite** – der separate *Start*-Tab wurde entfernt (hatte keine eigene Funktion mehr). *Pläne* zeigt oben ein laufendes Training zum Fortsetzen, darunter jeder Plan aufklappbar: antippen zeigt direkt die Trainingstage mit „Start ▶"-Button, ganz ohne Seitenwechsel. Das „✏️" öffnet die volle Plan-Verwaltung (Name/Emoji/Farbe, Trainingstage hinzufügen/entfernen/umsortieren).
-- **Plan in ein anderes Gym übernehmen** – ein Trainingsplan (inkl. aller Trainingstage & Zielwerte) lässt sich per Knopfdruck als unabhängige Kopie an einen anderen Ort kopieren, da das Kerntraining ja gleich bleibt. Original und Kopie sind danach getrennt frei änderbar.
+- **Plan in ein anderes Gym übernehmen** – ein Trainingsplan (inkl. aller Trainingstage & Zielwerte) lässt sich per Knopfdruck als unabhängige Kopie an einen anderen Ort kopieren, da das Kerntraining ja gleich bleibt. Original und Kopie sind danach getrennt frei änderbar. Beim Anlegen eines **neuen Ortes** wird direkt angeboten, einen bestehenden Plan zu übernehmen (nur Struktur – Übungen/Sätze/Wdh./Pause –, keine Gewichts-/Trainingsdaten, die sind ja ortsabhängig).
 - **Training aufzeichnen** – Gewicht & Wiederholungen je Satz eingeben, als Platzhalter direkt der letzte Wert (je Ort).
-- **Schlanker Übungskopf im Training** – nur Name + „⋮"-Menü. Darin: Pause ändern, Satz hinzufügen/entfernen, Notiz, Übung entfernen.
+- **Supersätze/Zirkel** – im Trainingstag per Mehrfachauswahl („🔗 Zirkel erstellen") mehrere Übungen zu einer Gruppe verbinden, die ohne Pause zwischen den Übungen absolviert wird. Im laufenden Training werden Zirkel-Übungen sichtbar zusammengefasst; der Pausen-Timer startet erst nach der letzten Übung der Gruppe.
+- **Schlanker Übungskopf im Training** – nur Name + „⋮"-Menü. Darin: Pause ändern, Satz hinzufügen/entfernen, Notiz, **Übung ersetzen**, **Reihenfolge nach oben/unten verschieben**, Übung entfernen.
 - **Dauerhafte Geräte-Notiz je Übung + Ort** – z. B. „Sitzhöhe 4, Griff außen". Bleibt für alle künftigen Trainings erhalten (kein Session-Zettel), getrennt je Ort (Geräte-Einstellungen sind zwischen Gyms nicht vergleichbar). Nur sichtbar, wenn eine gesetzt ist; editierbar über das „⋮"-Menü im Training **oder** direkt in der Bibliothek. Davon getrennt: ein allgemeiner, ortsunabhängiger „Technik-Hinweis" je Übung in der Bibliothek (z. B. „Griff schulterbreit").
-- **Sätze, Pausen & Übungen anpassbar** – beim Erstellen des Plans **und** während des Trainings. Nach dem Training wird **je Änderung einzeln gefragt**, ob sie in den Trainingsplan übernommen werden soll (z. B. neue Pausenzeit, mehr/weniger Sätze, hinzugefügte/entfernte Übung) – oder nur für diese eine Einheit gilt.
-- **Pausen-Timer** – Countdown nach jedem abgehakten Satz (mit Ton/Vibration), hält währenddessen den **Bildschirm wach** (Wake Lock, wo vom Browser unterstützt).
+- **Sätze, Pausen & Übungen anpassbar** – beim Erstellen des Plans **und** während des Trainings. Nach dem Training wird, sofern in den Einstellungen aktiviert, **je Änderung einzeln gefragt**, ob sie in den Trainingsplan übernommen werden soll (z. B. neue Pausenzeit, mehr/weniger Sätze, hinzugefügte/entfernte Übung) – oder nur für diese eine Einheit gilt.
+- **Pausen-Timer** – Countdown nach jedem abgehakten Satz (mit Ton/Vibration und optionaler Browser-Benachrichtigung, wenn die App gerade im Hintergrund ist), hält währenddessen den **Bildschirm wach** (Wake Lock, wo vom Browser unterstützt).
 - **Notizen** je Trainingseinheit (gesamtes Training) zusätzlich zu den Geräte-Notizen je Übung.
-- **Statistiken je Übung** – geschätztes 1RM (Epley), max. Gewicht, Volumen, persönliche Rekorde und ein Verlaufs-Chart, je Ort getrennt.
-- **Kalender / Habit-Tracker** – jeder Trainingstag & Plan bekommt ein **Kürzel oder Emoji**, das im Monatskalender erscheint. Plus Wochen-Streak.
+- **Statistiken je Übung** – geschätztes 1RM (Epley), max. Gewicht, Volumen, persönliche Rekorde und ein Verlaufs-Chart, je Ort getrennt. Zusätzlich eine **Muskelgruppen-Volumen-Auswertung** (7/30 Tage) auf der Statistik-Seite.
+- **Kalender / Habit-Tracker** – jeder Trainingstag & Plan bekommt ein **Kürzel oder Emoji**, das im Monatskalender erscheint. Plus Wochen-Streak und eine Liste der **letzten Trainings** darunter.
+- **Globale Suche** – über das 🔍-Symbol auf der Pläne-Seite, findet Pläne, Trainingstage, Übungen und vergangene Trainings.
+- **Papierkorb** – gelöschte Übungen und Trainings landen im Papierkorb (*Einstellungen → Papierkorb*) und lassen sich wiederherstellen oder endgültig entfernen.
+- **Einstellungen** – eigener Reiter unten mit Design (mehrere **Themes**: Dunkel, Hell, OLED Schwarz, Mitternachtsblau, Wald, Kontrast, oder „System"; Akzentfarbe, Schriftgröße, Animationen reduzieren), Trainings-Standardwerten, Backup-Erinnerung und Papierkorb/Gefahrenzone.
 - **Backup** – Export/Import als JSON-Datei.
 
 ## Warum diese Statistiken?
@@ -131,8 +135,8 @@ icons/                  App-Icons (SVG)
 
 - Optionaler Cloud-Sync über mehrere Geräte
 - Körpergewicht-/Fototracking
-- RPE/RIR, Aufwärmsätze (getrennt von Arbeitssätzen), Supersätze & Dropsätze
+- RPE/RIR, Aufwärmsätze (getrennt von Arbeitssätzen), Dropsätze
 - Progressive-Overload-Vorschläge ("+2,5 kg oder +1 Wdh. probieren"), PR-Hinweis live im Training
-- Plattenrechner, Bildschirm-Wachhalten während des Timers (Wake Lock)
-- Import aus anderen Apps (Strong, Hevy, JEFIT), Hell-Theme
+- Plattenrechner
+- Import aus anderen Apps (Strong, Hevy, JEFIT)
 - Icons als PNG (aktuell SVG – von Android/Chrome unterstützt; iOS bevorzugt PNG für den Homescreen)

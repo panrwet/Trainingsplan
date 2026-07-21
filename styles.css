@@ -1,6 +1,8 @@
 :root {
   --bg: #0f1220;
+  --bg-rgb: 15,18,32;
   --bg-elev: #171b2e;
+  --bg-elev-rgb: 23,27,46;
   --bg-elev2: #1f2440;
   --border: #2a2f4a;
   --text: #e8eaf2;
@@ -17,6 +19,51 @@
   --topbar-h: 50px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
+}
+
+/* ---------- Themes (Einstellungen -> Design) ---------- */
+/* "dark" ist das Standard-Theme und entspricht den :root-Werten oben, daher
+   hier ohne eigenen Block. Die Akzentfarbe wird zusätzlich per Inline-Style
+   auf documentElement gesetzt (siehe applyDisplaySettings in app.js) und
+   gewinnt dadurch unabhängig vom Theme immer gegenüber diesen Regeln. */
+:root[data-theme="light"] {
+  --bg: #f4f5f9; --bg-rgb: 244,245,249; --bg-elev: #ffffff; --bg-elev-rgb: 255,255,255; --bg-elev2: #eceef5;
+  --border: #dcdfe9; --text: #1b1e2b; --text-dim: #5b6178; --text-dim2: #868da8;
+  --accent: #4a63c7; --accent-2: #34479a;
+  --good: #1f9d63; --warn: #b5750a; --bad: #d13c3c;
+}
+:root[data-theme="oled"] {
+  --bg: #000000; --bg-rgb: 0,0,0; --bg-elev: #0a0a0a; --bg-elev-rgb: 10,10,10; --bg-elev2: #151515;
+  --border: #262626; --text: #f0f0f0; --text-dim: #a0a0a0; --text-dim2: #707070;
+}
+:root[data-theme="midnight"] {
+  --bg: #0a0e27; --bg-rgb: 10,14,39; --bg-elev: #121837; --bg-elev-rgb: 18,24,55; --bg-elev2: #1a2147;
+  --border: #262f5c; --text: #e6e9ff; --text-dim: #9aa3d9; --text-dim2: #6d76a8;
+  --accent: #5b7fff; --accent-2: #3d5ccc;
+}
+:root[data-theme="forest"] {
+  --bg: #0f1912; --bg-rgb: 15,25,18; --bg-elev: #16221a; --bg-elev-rgb: 22,34,26; --bg-elev2: #1e2e24;
+  --border: #2a3f31; --text: #e5f0e8; --text-dim: #9fb8a8; --text-dim2: #6e8578;
+  --accent: #4caf7d; --accent-2: #388a63;
+}
+:root[data-theme="contrast"] {
+  --bg: #000000; --bg-rgb: 0,0,0; --bg-elev: #000000; --bg-elev-rgb: 0,0,0; --bg-elev2: #1a1a1a;
+  --border: #ffffff; --text: #ffffff; --text-dim: #f0f0f0; --text-dim2: #d0d0d0;
+  --accent: #ffe600; --accent-2: #ccb800; --good: #00ff66; --warn: #ff9900; --bad: #ff3333;
+}
+/* Heller Akzent im Kontrast-Theme -> schwarzer statt weißer Text für genug Kontrast */
+:root[data-theme="contrast"] #restBar,
+:root[data-theme="contrast"] #restBar button,
+:root[data-theme="contrast"] .set-check.on { color: #000; }
+
+/* ---------- Schriftgröße (Einstellungen -> Design) ---------- */
+html[data-fontsize="small"] { font-size: 14px; }
+html[data-fontsize="large"] { font-size: 18px; }
+
+/* ---------- Animationen reduzieren (Einstellungen -> Design) ---------- */
+html[data-reduced-motion="1"] *, html[data-reduced-motion="1"] *::before, html[data-reduced-motion="1"] *::after {
+  transition-duration: .001ms !important; animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important; scroll-behavior: auto !important;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -38,7 +85,7 @@ html, body {
   padding-top: var(--safe-t);
   display: flex; align-items: center; gap: 6px;
   padding-left: 10px; padding-right: 10px;
-  background: rgba(15,18,32,.9);
+  background: rgba(var(--bg-rgb), .9);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
@@ -67,7 +114,7 @@ html, body {
   height: calc(var(--tabbar-h) + var(--safe-b));
   padding-bottom: var(--safe-b);
   display: flex; justify-content: space-around; align-items: stretch;
-  background: rgba(23,27,46,.96);
+  background: rgba(var(--bg-elev-rgb), .96);
   backdrop-filter: blur(10px);
   border-top: 1px solid var(--border);
 }
@@ -175,7 +222,14 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 .color-pick button {
   width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer;
 }
-.color-pick button.sel { border-color: #fff; }
+.color-pick button.sel { border-color: var(--text); }
+
+.theme-pick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.theme-pick button {
+  padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font-size: .85rem; cursor: pointer; font-family: inherit;
+}
+.theme-pick button.sel { border-color: var(--accent); background: rgba(108, 140, 255, .12); font-weight: 700; }
 
 /* ---------- Training screen ---------- */
 .train-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
@@ -192,15 +246,48 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 }
 .ex-body { padding: 9px 10px 10px; border-top: 1px solid var(--border); }
 
-.set-row { display: grid; grid-template-columns: 26px 1fr 1fr 44px 40px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.set-row { display: grid; grid-template-columns: 26px 1fr 1fr 44px; gap: 8px; align-items: center; margin-bottom: 8px; }
 .set-row .setno { color: var(--text-dim2); font-weight: 700; text-align: center; font-size: .9rem; }
 .set-row input { padding: 9px 8px; text-align: center; }
 .set-row.done input { border-color: var(--good); }
 .set-check { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); font-size: 1.1rem; cursor: pointer; display: grid; place-items: center; }
 .set-check.on { background: var(--good); border-color: var(--good); color: #06281a; }
-.set-del { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--text-dim2); cursor: pointer; }
-.set-head { display: grid; grid-template-columns: 26px 1fr 1fr 44px 40px; gap: 8px; font-size: .7rem; color: var(--text-dim2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; padding: 0 2px; }
+.set-head { display: grid; grid-template-columns: 26px 1fr 1fr 44px; gap: 8px; font-size: .7rem; color: var(--text-dim2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; padding: 0 2px; }
 .set-head span { text-align: center; }
+
+/* ---------- Supersätze/Zirkel (Training) ---------- */
+.superset-wrap {
+  border: 2px solid var(--accent-2); border-radius: var(--radius); padding: 8px;
+  margin-bottom: 10px; background: rgba(108, 140, 255, .05);
+}
+.superset-wrap .ex-block { margin-bottom: 8px; }
+.superset-wrap .ex-block:last-child { margin-bottom: 0; }
+.superset-label { font-size: .74rem; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; padding: 2px 4px 8px; }
+
+.select-bar {
+  position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar-h) + var(--safe-b));
+  z-index: 40; display: flex; gap: 8px; padding: 10px 12px;
+  background: var(--bg-elev); border-top: 1px solid var(--border);
+  box-shadow: 0 -4px 16px rgba(0,0,0,.25);
+}
+.select-bar .btn { flex: 1; }
+.select-card {
+  display: flex; align-items: center; gap: 10px; cursor: pointer;
+}
+.select-check {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px;
+  border: 2px solid var(--border); background: var(--bg); display: grid; place-items: center;
+  font-size: .85rem; color: transparent;
+}
+.select-check.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.select-card.sel { border-color: var(--accent); background: rgba(108, 140, 255, .08); }
+
+/* ---------- Muskelgruppen-Volumen (Statistik) ---------- */
+.vol-row { display: grid; grid-template-columns: 92px 1fr 56px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.vol-label { font-size: .82rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vol-bar-track { height: 10px; border-radius: 6px; background: var(--bg-elev2); overflow: hidden; }
+.vol-bar-fill { height: 100%; background: var(--accent); border-radius: 6px; }
+.vol-val { font-size: .78rem; color: var(--text-dim2); text-align: right; }
 
 /* ---------- Aktions-Menü (Übung im Training) ---------- */
 .sheet { display: flex; flex-direction: column; gap: 6px; }

@@ -115,6 +115,50 @@ function confirmDialog(msg, { danger = false, okText = 'OK' } = {}) {
   });
 }
 
+// ---------- Design/Anzeige-Einstellungen anwenden (Theme, Akzentfarbe, Schriftgröße, Bewegungsreduzierung) ----------
+const THEMES = [
+  { id: 'system', emoji: '🌓', label: 'System' },
+  { id: 'dark', emoji: '🌙', label: 'Dunkel' },
+  { id: 'light', emoji: '☀️', label: 'Hell' },
+  { id: 'oled', emoji: '⬛', label: 'OLED Schwarz' },
+  { id: 'midnight', emoji: '🌌', label: 'Mitternachtsblau' },
+  { id: 'forest', emoji: '🌲', label: 'Wald' },
+  { id: 'contrast', emoji: '🔲', label: 'Kontrast' },
+];
+const BG_BY_THEME = { dark: '#0f1220', light: '#f4f5f9', oled: '#000000', midnight: '#0a0e27', forest: '#0f1912', contrast: '#000000' };
+function resolveTheme(theme) {
+  if (theme === 'system') {
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+  }
+  return theme || 'dark';
+}
+// Akzentfarbe (Hex) um `percent` (-1..1) auf-/abdunkeln, für die zweite Akzentschattierung.
+function shade(hex, percent) {
+  const n = parseInt(String(hex).replace('#', ''), 16);
+  const clamp = v => Math.max(0, Math.min(255, v));
+  const r = clamp((n >> 16) + Math.round(255 * percent));
+  const g = clamp(((n >> 8) & 0xff) + Math.round(255 * percent));
+  const b = clamp((n & 0xff) + Math.round(255 * percent));
+  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+function applyDisplaySettings() {
+  const s = DB.db().settings;
+  const theme = resolveTheme(s.theme);
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.fontsize = s.fontSize || 'medium';
+  document.documentElement.dataset.reducedMotion = s.reducedMotion ? '1' : '0';
+  const accent = s.accentColor || '#6c8cff';
+  document.documentElement.style.setProperty('--accent', accent);
+  document.documentElement.style.setProperty('--accent-2', shade(accent, -0.22));
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) metaTheme.content = BG_BY_THEME[theme] || '#0f1220';
+}
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (DB.db().settings.theme === 'system') applyDisplaySettings();
+  });
+}
+
 // ---------- Chrome (Topbar) ----------
 function setChrome({ title, back = false, actions = [] }) {
   titleEl.textContent = title;
@@ -193,6 +237,7 @@ function updateTabs(hash) {
   else if (hash.startsWith('/calendar')) active = 'calendar';
   else if (hash.startsWith('/stats')) active = 'stats';
   else if (hash.startsWith('/library') || hash.startsWith('/exercise')) active = 'library';
+  else if (hash.startsWith('/settings')) active = 'settings';
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === active));
 }
 window.addEventListener('hashchange', render);
@@ -202,11 +247,51 @@ function startTraining(dayId) {
   if (s) navigate('/train/' + s.id);
 }
 
+// ---------- Globale Suche über Pläne/Trainingstage/Übungen/Trainings hinweg ----------
+function globalSearchModal() {
+  openModal({
+    title: 'Suche',
+    body: `<input id="f-gsearch" placeholder="Plan, Trainingstag, Übung oder Training suchen …" />
+      <div id="gsearchResults" style="margin-top:12px"></div>`,
+    onMount: (m, close) => {
+      const input = $('#f-gsearch', m);
+      const results = $('#gsearchResults', m);
+      const section = (title, rows) => rows.length ? `<div class="tiny muted" style="margin:10px 0 4px;text-transform:uppercase;font-size:.7rem;letter-spacing:.04em">${title}</div>${rows.join('')}` : '';
+      const row = (emoji, name, sub, kind, id) => `<div class="list-row" data-goto2="${kind}:${id}">
+        <div class="chip">${esc(emoji)}</div>
+        <div class="grow"><div class="r-title">${esc(name)}</div>${sub ? `<div class="r-sub">${esc(sub)}</div>` : ''}</div>
+        <span class="arrow">›</span></div>`;
+      const draw = q => {
+        if (!q.trim()) { results.innerHTML = `<div class="tiny muted center" style="padding:12px">Suchbegriff eingeben …</div>`; return; }
+        const r = DB.globalSearch(q);
+        const total = r.plans.length + r.days.length + r.exercises.length + r.sessions.length;
+        if (!total) { results.innerHTML = `<div class="tiny muted center" style="padding:12px">Keine Treffer.</div>`; return; }
+        results.innerHTML =
+          section('Pläne', r.plans.map(p => row(p.emoji, p.name, '', 'plan', p.id))) +
+          section('Trainingstage', r.days.map(d => row(d.emoji, d.name, '', 'day', d.id))) +
+          section('Übungen', r.exercises.map(e => row('📚', e.name, '', 'ex', e.id))) +
+          section('Trainings', r.sessions.map(s => row(s.emoji || '💪', s.dayName || 'Training', fmtDate(s.date), 'ses', s.id)));
+        $$('[data-goto2]', results).forEach(n => n.onclick = () => {
+          close();
+          const [kind, id] = n.dataset.goto2.split(':');
+          if (kind === 'plan') navigate('/plan/' + id);
+          else if (kind === 'day') navigate('/day/' + id);
+          else if (kind === 'ex') navigate('/stats/' + id);
+          else if (kind === 'ses') navigate('/train/' + id);
+        });
+      };
+      draw('');
+      input.oninput = e => draw(e.target.value);
+      setTimeout(() => input.focus(), 50);
+    },
+  });
+}
+
 // ============================================================
 //  Ansicht: Pläne (Orte-Übersicht)
 // ============================================================
 route('/plans', () => {
-  setChrome({ title: 'Pläne', back: false, actions: [actionBtn('⚙️', () => navigate('/settings'))] });
+  setChrome({ title: 'Pläne', back: false, actions: [actionBtn('🔍', () => globalSearchModal())] });
   const locs = DB.locations();
   let html = locationBarHTML();
 
@@ -292,8 +377,15 @@ function editLocationModal(id) {
         const name = $('#f-name', m).value.trim();
         if (!name) return toast('Bitte einen Namen eingeben');
         const data = { name, emoji: sc.getEmoji() || '📍', color: sc.getColor() };
-        if (id) DB.updateLocation(id, data); else DB.addLocation(data);
-        close(); render();
+        if (id) {
+          DB.updateLocation(id, data); close(); render();
+        } else {
+          const newLoc = DB.addLocation(data);
+          close();
+          render(); // Pläne für den neuen (bereits aktiven) Ort sofort anzeigen
+          const hasOtherPlans = DB.locations().some(l => l.id !== newLoc.id && DB.plansByLocation(l.id).length);
+          if (hasOtherPlans) offerPlanImportModal(newLoc.id);
+        }
       };
       const del = $('[data-del]', m);
       if (del) del.onclick = async () => {
@@ -301,6 +393,38 @@ function editLocationModal(id) {
           DB.deleteLocation(id); close(); navigate('/plans');
         }
       };
+    },
+  });
+}
+
+// Nach dem Anlegen eines neuen Orts anbieten, einen bestehenden Plan von
+// einem anderen Ort zu übernehmen (nur die Struktur - Übungen, Sätze/Wdh./
+// Pause -, keine Gewichts-/Wiederholungsdaten, die sind ja ortsabhängig).
+function offerPlanImportModal(newLocationId) {
+  const otherLocs = DB.locations().filter(l => l.id !== newLocationId);
+  const rows = [];
+  otherLocs.forEach(loc => {
+    DB.plansByLocation(loc.id).forEach(p => rows.push({ plan: p, loc }));
+  });
+  openModal({
+    title: 'Plan übernehmen?',
+    body: `<p class="tiny muted" style="margin-top:0">Übernimm einen bestehenden Plan von einem anderen Ort als Kopie - nur die Struktur (Übungen, Sätze/Wdh./Pause), keine Gewichte oder Trainingsverlauf. Du kannst mehrere übernehmen.</p>
+      <div id="planImportList">${rows.map(r => `<div class="list-row" data-import-plan="${r.plan.id}">
+        <div class="chip" style="background:${esc(r.plan.color)}22;color:${esc(r.plan.color)}">${esc(r.plan.emoji)}</div>
+        <div class="grow"><div class="r-title">${esc(r.plan.name)}</div>
+          <div class="r-sub">von ${esc(r.loc.emoji)} ${esc(r.loc.name)}</div></div>
+        <span class="arrow">＋</span></div>`).join('') || '<div class="tiny muted center" style="padding:10px">Keine Pläne vorhanden.</div>'}</div>`,
+    footer: `<button class="btn ghost" data-x>Ohne Plan starten</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $$('[data-import-plan]', m).forEach(row => row.onclick = () => {
+        const planId = row.dataset.importPlan;
+        DB.copyPlanToLocation(planId, newLocationId);
+        row.querySelector('.arrow').textContent = '✓';
+        row.style.opacity = '.6'; row.style.pointerEvents = 'none';
+        toast('Plan übernommen');
+        render(); // Pläne-Liste im Hintergrund aktualisieren, egal wie das Modal geschlossen wird
+      });
     },
   });
 }
@@ -439,50 +563,114 @@ function editDayModal(id, planId) {
 route('/day/:id', ({ id }) => {
   const day = DB.getDay(id);
   if (!day) return navigate('/plans');
-  setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: [actionBtn('✏️', () => editDayModal(id, day.planId))] });
   const plan = DB.getPlan(day.planId);
   const loc = plan ? DB.getLocation(plan.locationId) : null;
+  let selectMode = false;
+  const selected = new Set();
 
-  let html = `${loc ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(loc.emoji)} ${esc(loc.name)} · ${esc(plan.emoji)} ${esc(plan.name)}</div>` : ''}
-    <button class="btn good block" id="startBtn" style="margin-bottom:16px">▶ Training starten</button>
-    <div class="section-title">Übungen</div>`;
-  if (!day.exercises.length) {
-    html += `<div class="empty"><div class="big">📚</div><div>Noch keine Übungen.</div>
-      <div class="tiny" style="margin:8px 0 0">Füge Übungen aus deiner Bibliothek hinzu.</div></div>`;
-  } else {
-    day.exercises.forEach((item, i) => {
-      const ex = DB.getExercise(item.exerciseId);
-      html += `<div class="card" data-item="${item.id}">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div class="grow" style="flex:1"><b>${esc(ex ? ex.name : '(gelöscht)')}</b>
-            ${ex ? tagBadgesHTML(ex) : ''}
-            <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh · Pause ${item.restSec}s</div></div>
-          <span class="mv" data-up="${item.id}" style="padding:4px 6px;color:var(--text-dim2)">▲</span>
-          <span class="mv" data-down="${item.id}" style="padding:4px 6px;color:var(--text-dim2)">▼</span>
-          <button class="btn ghost sm" data-edit="${item.id}">✏️</button>
-          <button class="btn ghost sm" data-rm="${item.id}">🗑️</button>
-        </div>
-      </div>`;
+  function draw() {
+    setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: selectMode ? [] : [actionBtn('✏️', () => editDayModal(id, day.planId))] });
+
+    let html = `${loc ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(loc.emoji)} ${esc(loc.name)} · ${esc(plan.emoji)} ${esc(plan.name)}</div>` : ''}`;
+    if (!selectMode) html += `<button class="btn good block" id="startBtn" style="margin-bottom:16px">▶ Training starten</button>`;
+    html += `<div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Übungen</span>
+      ${selectMode ? `<span class="tiny muted">${selected.size} ausgewählt</span>`
+        : (day.exercises.length > 1 ? `<button class="btn ghost sm" id="startGroupBtn">🔗 Zirkel erstellen</button>` : '')}
+    </div>`;
+
+    if (!day.exercises.length) {
+      html += `<div class="empty"><div class="big">📚</div><div>Noch keine Übungen.</div>
+        <div class="tiny" style="margin:8px 0 0">Füge Übungen aus deiner Bibliothek hinzu.</div></div>`;
+    } else if (selectMode) {
+      html += `<p class="tiny muted" style="margin-top:0">Wähle 2 oder mehr Übungen, die als Zirkel ohne Pause dazwischen trainiert werden sollen.</p>`;
+      day.exercises.forEach(item => { html += dayExerciseCardHTML(item, true, selected); });
+    } else {
+      let i = 0;
+      while (i < day.exercises.length) {
+        const gid = day.exercises[i].groupId;
+        if (gid) {
+          let j = i;
+          while (j < day.exercises.length && day.exercises[j].groupId === gid) j++;
+          html += `<div class="superset-wrap"><div class="superset-label" style="display:flex;justify-content:space-between;align-items:center">
+            <span>🔗 Zirkel</span><button class="btn ghost sm" data-ungroup="${gid}">Auflösen</button></div>`;
+          for (let k = i; k < j; k++) html += dayExerciseCardHTML(day.exercises[k], false, selected);
+          html += `</div>`;
+          i = j;
+        } else {
+          html += dayExerciseCardHTML(day.exercises[i], false, selected);
+          i++;
+        }
+      }
+    }
+    appEl.innerHTML = html;
+
+    if (selectMode) {
+      $$('[data-select]', appEl).forEach(n => n.onclick = () => {
+        const iid = n.dataset.select;
+        selected.has(iid) ? selected.delete(iid) : selected.add(iid);
+        draw();
+      });
+      const bar = el('div', { class: 'select-bar' });
+      bar.innerHTML = `<button class="btn ghost" id="cancelGroupBtn">Abbrechen</button>
+        <button class="btn primary" id="confirmGroupBtn" ${selected.size < 2 ? 'disabled' : ''}>🔗 Gruppieren (${selected.size})</button>`;
+      appEl.append(bar);
+      $('#cancelGroupBtn', bar).onclick = () => { selectMode = false; selected.clear(); draw(); };
+      $('#confirmGroupBtn', bar).onclick = () => {
+        if (selected.size < 2) return;
+        DB.groupExercises(id, [...selected]);
+        toast('Zirkel erstellt');
+        selectMode = false; selected.clear();
+        render();
+      };
+      return;
+    }
+
+    const startBtn = $('#startBtn', appEl);
+    if (startBtn) startBtn.onclick = () => { if (!day.exercises.length) return toast('Erst Übungen hinzufügen'); startTraining(id); };
+    const startGroupBtn = $('#startGroupBtn', appEl);
+    if (startGroupBtn) startGroupBtn.onclick = () => { selectMode = true; selected.clear(); draw(); };
+    const ids = day.exercises.map(x => x.id);
+    $$('[data-up]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.up, -1); DB.reorderDayExercises(id, ids); render(); });
+    $$('[data-down]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.down, +1); DB.reorderDayExercises(id, ids); render(); });
+    $$('[data-edit]', appEl).forEach(n => n.onclick = () => editDayExerciseModal(id, n.dataset.edit));
+    $$('[data-rm]', appEl).forEach(n => n.onclick = async () => {
+      if (await confirmDialog('Übung aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) { DB.removeDayExercise(id, n.dataset.rm); render(); }
     });
+    $$('[data-ungroup]', appEl).forEach(n => n.onclick = async () => {
+      if (await confirmDialog('Zirkel auflösen?', { okText: 'Auflösen' })) { DB.ungroupExercises(id, n.dataset.ungroup); render(); }
+    });
+    appEl.append(el('button', { class: 'fab', onclick: () => pickExerciseModal(exId => {
+      DB.addExerciseToDay(id, exId); render();
+    }) }, '+'));
   }
-  appEl.innerHTML = html;
-
-  $('#startBtn', appEl).onclick = () => {
-    if (!day.exercises.length) return toast('Erst Übungen hinzufügen');
-    startTraining(id);
-  };
-  const ids = day.exercises.map(x => x.id);
-  $$('[data-up]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.up, -1); DB.reorderDayExercises(id, ids); render(); });
-  $$('[data-down]', appEl).forEach(n => n.onclick = () => { moveInArray(ids, n.dataset.down, +1); DB.reorderDayExercises(id, ids); render(); });
-  $$('[data-edit]', appEl).forEach(n => n.onclick = () => editDayExerciseModal(id, n.dataset.edit));
-  $$('[data-rm]', appEl).forEach(n => n.onclick = async () => {
-    if (await confirmDialog('Übung aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) { DB.removeDayExercise(id, n.dataset.rm); render(); }
-  });
-
-  appEl.append(el('button', { class: 'fab', onclick: () => pickExerciseModal(exId => {
-    DB.addExerciseToDay(id, exId); render();
-  }) }, '+'));
+  draw();
 });
+
+function dayExerciseCardHTML(item, selectMode, selected) {
+  const ex = DB.getExercise(item.exerciseId);
+  if (selectMode) {
+    const isSel = selected.has(item.id);
+    return `<div class="card tap select-card ${isSel ? 'sel' : ''}" data-select="${item.id}">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="select-check ${isSel ? 'on' : ''}">${isSel ? '✓' : ''}</div>
+        <div class="grow"><b>${esc(ex ? ex.name : '(gelöscht)')}</b>
+          <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh</div></div>
+      </div>
+    </div>`;
+  }
+  return `<div class="card" data-item="${item.id}">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="grow" style="flex:1"><b>${esc(ex ? ex.name : '(gelöscht)')}</b>
+        ${ex ? tagBadgesHTML(ex) : ''}
+        <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh · Pause ${item.restSec}s</div></div>
+      <span class="mv" data-up="${item.id}" style="padding:4px 6px;color:var(--text-dim2)">▲</span>
+      <span class="mv" data-down="${item.id}" style="padding:4px 6px;color:var(--text-dim2)">▼</span>
+      <button class="btn ghost sm" data-edit="${item.id}">✏️</button>
+      <button class="btn ghost sm" data-rm="${item.id}">🗑️</button>
+    </div>
+  </div>`;
+}
 
 function editDayExerciseModal(dayId, itemId) {
   const day = DB.getDay(dayId);
@@ -942,8 +1130,10 @@ function renderTrain(container, id) {
 
   const finishBtn = $('#finishBtn', container);
   if (finishBtn) finishBtn.onclick = async () => {
-    const diffs = DB.computeSessionPlanDiff(id);
-    if (diffs.length) await planDiffModal(id, diffs);
+    if (DB.db().settings.askPlanDiff) {
+      const diffs = DB.computeSessionPlanDiff(id);
+      if (diffs.length) await planDiffModal(id, diffs);
+    }
     DB.updateSession(id, { finishedAt: Date.now() });
     stopRest();
     toast('Training gespeichert 💪');
@@ -985,92 +1175,140 @@ function planDiffModal(sessionId, diffs) {
   });
 }
 
+// Ist der Eintrag an Index i der LETZTE einer zusammenhängenden Zirkel-Gruppe
+// (oder gar nicht gruppiert)? Nur dann startet das Abhaken eines Satzes den
+// Pausen-Timer - innerhalb eines Zirkels wird direkt zur nächsten Übung
+// gewechselt, ohne Pause.
+function isLastInGroup(entries, i) {
+  const gid = entries[i].groupId;
+  if (!gid) return true;
+  const next = entries[i + 1];
+  return !(next && next.groupId === gid);
+}
+
 function renderEntries(container, id) {
   const s = DB.getSession(id);
   const wrap = $('#entries', container);
   wrap.innerHTML = '';
-  s.entries.forEach((entry, ei) => {
-    // "letztes Mal" nur vom selben Ort (Geräte sind zwischen Gyms nicht vergleichbar).
-    // Werte erscheinen als Platzhalter in den Feldern – daher keine separate Zeile mehr.
-    const last = DB.lastEntryFor(entry.exerciseId, id, s.locationId);
-    const ex = DB.getExercise(entry.exerciseId);
-    const badges = tagBadgesHTML(ex);
-    // Dauerhafte Geräte-/Einstellungs-Notiz, je Übung UND Ort (z.B. Sitzhöhe) -
-    // nicht ans einzelne Training gebunden, bleibt für nächstes Mal erhalten.
-    const noteRec = DB.getExerciseNote(entry.exerciseId, s.locationId);
-    const noteHTML = noteRec ? `<div class="ex-note">📝 ${esc(noteRec.text)}</div>` : '';
-    const block = el('div', { class: 'ex-block' });
-    block.innerHTML = `
-      <div class="ex-head">
-        <div class="ex-name">${esc(entry.name)}</div>
-        <button class="btn ghost sm" data-menu>⋮</button>
-      </div>
-      ${(badges || noteHTML) ? `<div class="ex-meta">${badges}${noteHTML}</div>` : ''}
-      <div class="ex-body">
-        <div class="set-head"><span>#</span><span>Gewicht</span><span>Wdh.</span><span>✓</span><span></span></div>
-        <div class="sets"></div>
-      </div>`;
+  let i = 0;
+  while (i < s.entries.length) {
+    const gid = s.entries[i].groupId;
+    if (gid) {
+      let j = i;
+      while (j < s.entries.length && s.entries[j].groupId === gid) j++;
+      const groupWrap = el('div', { class: 'superset-wrap' });
+      groupWrap.append(el('div', { class: 'superset-label' }, '🔗 Zirkel – keine Pause zwischen den Übungen'));
+      for (let k = i; k < j; k++) groupWrap.append(renderExerciseBlock(s, id, container, k));
+      wrap.append(groupWrap);
+      i = j;
+    } else {
+      wrap.append(renderExerciseBlock(s, id, container, i));
+      i++;
+    }
+  }
+}
 
-    const setsEl = $('.sets', block);
-    entry.sets.forEach((set, si) => {
-      const row = el('div', { class: 'set-row' + (set.done ? ' done' : '') });
-      row.innerHTML = `
-        <div class="setno">${si + 1}</div>
-        <input type="number" inputmode="decimal" step="0.5" placeholder="${last?.entry.sets[si] ? fmtWeight(DB.num(last.entry.sets[si].weight)) : (entry.unit || 'kg')}" value="${set.weight === '' ? '' : esc(set.weight)}" data-w />
-        <input type="number" inputmode="numeric" placeholder="${last?.entry.sets[si] ? DB.num(last.entry.sets[si].reps) : (entry.targetReps || '')}" value="${set.reps === '' ? '' : esc(set.reps)}" data-r />
-        <button class="set-check ${set.done ? 'on' : ''}" data-check>✓</button>
-        <button class="set-del" data-delset>✕</button>`;
-      $('[data-w]', row).oninput = e => { set.weight = e.target.value; DB.save(); };
-      $('[data-r]', row).oninput = e => { set.reps = e.target.value; DB.save(); };
-      $('[data-check]', row).onclick = () => {
-        set.done = !set.done;
-        if (set.done && (set.weight === '' || set.reps === '')) {
-          // Platzhalter (letztes Mal) übernehmen, falls leer
-          if (set.weight === '' && last?.entry.sets[si]) set.weight = DB.num(last.entry.sets[si].weight);
-          if (set.reps === '' && last?.entry.sets[si]) set.reps = DB.num(last.entry.sets[si].reps);
-        }
-        DB.save();
-        row.classList.toggle('done', set.done);
-        $('[data-check]', row).classList.toggle('on', set.done);
-        $('[data-w]', row).value = set.weight === '' ? '' : set.weight;
-        $('[data-r]', row).value = set.reps === '' ? '' : set.reps;
-        if (set.done) startRest(entry.restSec);
-      };
-      $('[data-delset]', row).onclick = () => { entry.sets.splice(si, 1); DB.save(); renderEntries(container, id); };
-      setsEl.append(row);
-    });
+function renderExerciseBlock(s, id, container, ei) {
+  const entry = s.entries[ei];
+  // "letztes Mal" nur vom selben Ort (Geräte sind zwischen Gyms nicht vergleichbar).
+  // Werte erscheinen als Platzhalter in den Feldern – daher keine separate Zeile mehr.
+  const last = DB.lastEntryFor(entry.exerciseId, id, s.locationId);
+  const ex = DB.getExercise(entry.exerciseId);
+  const badges = tagBadgesHTML(ex);
+  // Dauerhafte Geräte-/Einstellungs-Notiz, je Übung UND Ort (z.B. Sitzhöhe) -
+  // nicht ans einzelne Training gebunden, bleibt für nächstes Mal erhalten.
+  const noteRec = DB.getExerciseNote(entry.exerciseId, s.locationId);
+  const noteHTML = noteRec ? `<div class="ex-note">📝 ${esc(noteRec.text)}</div>` : '';
+  const block = el('div', { class: 'ex-block' });
+  block.innerHTML = `
+    <div class="ex-head">
+      <div class="ex-name">${esc(entry.name)}</div>
+      <button class="btn ghost sm" data-menu>⋮</button>
+    </div>
+    ${(badges || noteHTML) ? `<div class="ex-meta">${badges}${noteHTML}</div>` : ''}
+    <div class="ex-body">
+      <div class="set-head"><span>#</span><span>Gewicht</span><span>Wdh.</span><span>✓</span></div>
+      <div class="sets"></div>
+    </div>`;
 
-    $('[data-menu]', block).onclick = () => exerciseMenuModal(entry, !!noteRec, {
-      onAddSet: () => {
-        const prev = entry.sets[entry.sets.length - 1];
-        entry.sets.push({ weight: prev ? prev.weight : '', reps: prev ? prev.reps : '', done: false });
-        DB.save(); renderEntries(container, id);
-      },
-      onRemoveSet: () => {
-        if (!entry.sets.length) return;
-        entry.sets.pop(); DB.save(); renderEntries(container, id);
-      },
-      onRest: () => editRestModal(entry, () => renderEntries(container, id)),
-      onNote: () => editExerciseNoteModal(entry.exerciseId, s.locationId, () => renderEntries(container, id)),
-      onRemoveExercise: async () => {
-        if (await confirmDialog('Übung aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
-          s.entries.splice(ei, 1); DB.save(); renderEntries(container, id);
-        }
-      },
-    });
-    wrap.append(block);
+  const setsEl = $('.sets', block);
+  entry.sets.forEach((set, si) => {
+    const row = el('div', { class: 'set-row' + (set.done ? ' done' : '') });
+    row.innerHTML = `
+      <div class="setno">${si + 1}</div>
+      <input type="number" inputmode="decimal" step="0.5" placeholder="${last?.entry.sets[si] ? fmtWeight(DB.num(last.entry.sets[si].weight)) : (entry.unit || 'kg')}" value="${set.weight === '' ? '' : esc(set.weight)}" data-w />
+      <input type="number" inputmode="numeric" placeholder="${last?.entry.sets[si] ? DB.num(last.entry.sets[si].reps) : (entry.targetReps || '')}" value="${set.reps === '' ? '' : esc(set.reps)}" data-r />
+      <button class="set-check ${set.done ? 'on' : ''}" data-check>✓</button>`;
+    $('[data-w]', row).oninput = e => { set.weight = e.target.value; DB.save(); };
+    $('[data-r]', row).oninput = e => { set.reps = e.target.value; DB.save(); };
+    $('[data-check]', row).onclick = () => {
+      set.done = !set.done;
+      if (set.done && (set.weight === '' || set.reps === '')) {
+        // Platzhalter (letztes Mal) übernehmen, falls leer
+        if (set.weight === '' && last?.entry.sets[si]) set.weight = DB.num(last.entry.sets[si].weight);
+        if (set.reps === '' && last?.entry.sets[si]) set.reps = DB.num(last.entry.sets[si].reps);
+      }
+      DB.save();
+      row.classList.toggle('done', set.done);
+      $('[data-check]', row).classList.toggle('on', set.done);
+      $('[data-w]', row).value = set.weight === '' ? '' : set.weight;
+      $('[data-r]', row).value = set.reps === '' ? '' : set.reps;
+      if (set.done && isLastInGroup(s.entries, ei)) startRest(entry.restSec);
+    };
+    setsEl.append(row);
   });
+
+  $('[data-menu]', block).onclick = () => exerciseMenuModal(entry, !!noteRec, ei === 0, ei === s.entries.length - 1, {
+    onAddSet: () => {
+      const prev = entry.sets[entry.sets.length - 1];
+      entry.sets.push({ weight: prev ? prev.weight : '', reps: prev ? prev.reps : '', done: false });
+      DB.save(); renderEntries(container, id);
+    },
+    onRemoveSet: () => {
+      if (!entry.sets.length) return;
+      entry.sets.pop(); DB.save(); renderEntries(container, id);
+    },
+    onRest: () => editRestModal(entry, () => renderEntries(container, id)),
+    onNote: () => editExerciseNoteModal(entry.exerciseId, s.locationId, () => renderEntries(container, id)),
+    onReplace: () => pickExerciseModal(exId => {
+      const newEx = DB.getExercise(exId);
+      entry.exerciseId = exId;
+      entry.name = newEx ? newEx.name : 'Übung';
+      entry.unit = newEx?.unit || 'kg';
+      entry.sets = [{ weight: '', reps: '', done: false }];
+      DB.save(); renderEntries(container, id);
+    }),
+    onMoveUp: () => {
+      if (ei <= 0) return;
+      [s.entries[ei - 1], s.entries[ei]] = [s.entries[ei], s.entries[ei - 1]];
+      DB.save(); renderEntries(container, id);
+    },
+    onMoveDown: () => {
+      if (ei >= s.entries.length - 1) return;
+      [s.entries[ei], s.entries[ei + 1]] = [s.entries[ei + 1], s.entries[ei]];
+      DB.save(); renderEntries(container, id);
+    },
+    onRemoveExercise: async () => {
+      if (await confirmDialog('Übung aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
+        s.entries.splice(ei, 1); DB.save(); renderEntries(container, id);
+      }
+    },
+  });
+  return block;
 }
 
 // Kompaktes Aktions-Menü für eine Übung im laufenden Training (ersetzt die
 // vorherigen Einzel-Buttons für Pause/Löschen -> schlankerer Übungskopf).
-function exerciseMenuModal(entry, hasNote, actions) {
+function exerciseMenuModal(entry, hasNote, isFirst, isLast, actions) {
   openModal({
     title: entry.name,
     body: `<div class="sheet">
       <button class="sheet-btn" data-act="rest">⏱ Pause ändern <span class="tiny muted">(aktuell ${entry.restSec}s)</span></button>
       <button class="sheet-btn" data-act="addset">＋ Satz hinzufügen</button>
       <button class="sheet-btn" data-act="rmset">－ Letzten Satz entfernen</button>
+      <button class="sheet-btn" data-act="replace">🔄 Übung ersetzen</button>
+      ${!isFirst ? '<button class="sheet-btn" data-act="up">↑ Nach oben verschieben</button>' : ''}
+      ${!isLast ? '<button class="sheet-btn" data-act="down">↓ Nach unten verschieben</button>' : ''}
       <button class="sheet-btn" data-act="note">📝 ${hasNote ? 'Notiz bearbeiten' : 'Notiz hinzufügen'}</button>
       <button class="sheet-btn danger" data-act="remove">🗑️ Übung aus Training entfernen</button>
     </div>`,
@@ -1080,6 +1318,9 @@ function exerciseMenuModal(entry, hasNote, actions) {
       $('[data-act="rest"]', m).onclick = () => { close(); actions.onRest(); };
       $('[data-act="addset"]', m).onclick = () => { close(); actions.onAddSet(); };
       $('[data-act="rmset"]', m).onclick = () => { close(); actions.onRemoveSet(); };
+      $('[data-act="replace"]', m).onclick = () => { close(); actions.onReplace(); };
+      const up = $('[data-act="up"]', m); if (up) up.onclick = () => { close(); actions.onMoveUp(); };
+      const down = $('[data-act="down"]', m); if (down) down.onclick = () => { close(); actions.onMoveDown(); };
       $('[data-act="note"]', m).onclick = () => { close(); actions.onNote(); };
       $('[data-act="remove"]', m).onclick = () => { close(); actions.onRemoveExercise(); };
     },
@@ -1153,9 +1394,25 @@ function startRest(sec) {
   acquireWakeLock();
   restTimer.iv = setInterval(() => {
     restTimer.remaining--;
-    if (restTimer.remaining <= 0) { beep(); stopRest(); toast('Pause vorbei ▶'); }
+    if (restTimer.remaining <= 0) { beep(); notifyRestEnd(); stopRest(); toast('Pause vorbei ▶'); }
     else updateRestBar();
   }, 1000);
+}
+
+// Browser-Benachrichtigung am Pausenende (zusätzlich zu Ton/Vibration) - nur
+// wenn eingeschaltet, Berechtigung erteilt ist und die App gerade NICHT im
+// Vordergrund/Fokus ist (sonst reicht der Ton, eine Notification wäre doppelt).
+function notifyRestEnd() {
+  const s = DB.db().settings;
+  if (!s.restNotifications) return;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (document.visibilityState === 'visible' && document.hasFocus()) return;
+  const fire = reg => reg.showNotification('Pause vorbei ▶', { body: 'Weiter geht\'s mit dem nächsten Satz.', icon: './icons/icon-192.png', tag: 'rest-end' });
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.ready.then(fire).catch(() => { try { new Notification('Pause vorbei ▶'); } catch (e) { /* ignore */ } });
+  } else {
+    try { new Notification('Pause vorbei ▶'); } catch (e) { /* ignore */ }
+  }
 }
 function stopRest() {
   if (restTimer?.iv) clearInterval(restTimer.iv);
@@ -1251,7 +1508,8 @@ function drawCalendar() {
   const { y, m } = calState;
   const byDate = DB.sessionsByDate();
   const first = new Date(y, m, 1);
-  const startDow = (first.getDay() + 6) % 7; // Mo=0
+  const sundayFirst = DB.db().settings.weekStart === 'sun';
+  const startDow = sundayFirst ? first.getDay() : (first.getDay() + 6) % 7; // Mo=0 bzw. So=0, je nach Einstellung
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const todayKey = DB.todayISO();
 
@@ -1261,7 +1519,7 @@ function drawCalendar() {
   const totalSessions = DB.sessions().filter(s => s.finishedAt).length;
 
   let cells = '';
-  const dows = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+  const dows = sundayFirst ? ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'] : ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
   dows.forEach(d => cells += `<div class="cal-dow">${d}</div>`);
   for (let i = 0; i < startDow; i++) cells += `<div class="cal-cell empty-cell"></div>`;
   for (let d = 1; d <= daysInMonth; d++) {
@@ -1290,6 +1548,8 @@ function drawCalendar() {
       <div class="cal-grid">${cells}</div>
     </div>
     <p class="tiny muted center">Jeder Trainingstag erscheint mit seinem Kürzel/Emoji – wie ein Habit-Tracker. Tippe auf einen Tag mit Eintrag.</p>
+    <div class="section-title">Letzte Trainings</div>
+    <div id="recentList"></div>
   `;
   $('[data-prev]', appEl).onclick = () => { calState.m--; if (calState.m < 0) { calState.m = 11; calState.y--; } drawCalendar(); };
   $('[data-next]', appEl).onclick = () => { calState.m++; if (calState.m > 11) { calState.m = 0; calState.y++; } drawCalendar(); };
@@ -1297,6 +1557,22 @@ function drawCalendar() {
     const evs = byDate[n.dataset.date]; if (!evs || !evs.length) return;
     dayDetailModal(n.dataset.date, evs);
   });
+
+  const recent = DB.sessions().filter(s => s.finishedAt).slice(0, 8);
+  const recentList = $('#recentList', appEl);
+  recentList.innerHTML = recent.length ? recent.map(s => sessionRow(s)).join('')
+    : `<div class="tiny muted center" style="padding:8px">Noch keine abgeschlossenen Trainings.</div>`;
+  $$('[data-session]', recentList).forEach(n => n.onclick = () => navigate('/train/' + n.dataset.session));
+}
+
+function sessionRow(s) {
+  const totalSets = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).length, 0);
+  const vol = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).reduce((x, st) => x + DB.num(st.weight) * DB.num(st.reps), 0), 0);
+  return `<div class="list-row" data-session="${s.id}">
+    <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '💪')}</div>
+    <div class="grow"><div class="r-title">${esc(s.dayName || 'Training')}</div>
+      <div class="r-sub">${fmtDate(s.date)} · ${totalSets} Sätze · ${fmtWeight(vol)} kg Vol.</div></div>
+    <span class="arrow">›</span></div>`;
 }
 
 function currentStreak(byDate) {
@@ -1335,6 +1611,7 @@ function dayDetailModal(dateKey, evs) {
 // ============================================================
 //  Ansicht: Statistik
 // ============================================================
+let statsVolPeriod = 7;
 route('/stats', () => {
   setChrome({ title: 'Statistik', back: false });
   const locs = DB.locations();
@@ -1346,6 +1623,17 @@ route('/stats', () => {
   const active = DB.getActiveLocation();
   const list = DB.exercisesTrainedAtLocation(active.id);
   html += `<p class="tiny muted">Statistik für <b>${esc(active.emoji)} ${esc(active.name)}</b> – je Ort getrennt, da Geräte zwischen Gyms nicht vergleichbar sind.</p>`;
+
+  const volStats = DB.muscleVolumeStats(active.id, statsVolPeriod);
+  html += `<div class="section-title">Muskelgruppen-Volumen</div>
+    <div class="card">
+      <div class="btn-row" style="margin-bottom:10px">
+        <button class="btn ${statsVolPeriod === 7 ? 'primary' : 'ghost'} sm" data-vol-period="7">7 Tage</button>
+        <button class="btn ${statsVolPeriod === 30 ? 'primary' : 'ghost'} sm" data-vol-period="30">30 Tage</button>
+      </div>
+      ${volumeBarsHTML(volStats)}
+    </div>`;
+
   if (!list.length) {
     html += `<div class="empty"><div class="big">📈</div><div>Noch keine Trainingsdaten für „${esc(active.name)}".</div>
       <div class="tiny" style="margin:8px 0 0">Zeichne an diesem Ort ein paar Trainings auf.</div></div>`;
@@ -1361,7 +1649,18 @@ route('/stats', () => {
   appEl.innerHTML = html;
   wireLocationBar(appEl);
   $$('[data-ex]', appEl).forEach(n => n.onclick = () => navigate('/stats/' + n.dataset.ex));
+  $$('[data-vol-period]', appEl).forEach(n => n.onclick = () => { statsVolPeriod = parseInt(n.dataset.volPeriod); render(); });
 });
+
+function volumeBarsHTML(stats) {
+  if (!stats.length) return `<div class="tiny muted center" style="padding:12px">Keine Trainingsdaten in diesem Zeitraum.</div>`;
+  const max = Math.max(...stats.map(s => s.volume));
+  return stats.map(s => `<div class="vol-row">
+    <div class="vol-label">${esc(s.muscle)}</div>
+    <div class="vol-bar-track"><div class="vol-bar-fill" style="width:${max ? Math.round(s.volume / max * 100) : 0}%"></div></div>
+    <div class="vol-val">${fmtWeight(s.volume)}</div>
+  </div>`).join('');
+}
 
 route('/stats/:id', ({ id }) => {
   const ex = DB.getExercise(id);
@@ -1447,40 +1746,142 @@ function lineChart(points, unit = '') {
   </svg>`;
 }
 
+function fmtTs(ms) {
+  const d = new Date(ms);
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+}
+
+// ---------- Papierkorb (gelöschte Übungen/Trainings, wiederherstellbar) ----------
+function openTrashModal() {
+  let tab = 'ex';
+  openModal({
+    title: 'Papierkorb',
+    body: `<div class="btn-row" id="trashTabs" style="margin-bottom:10px">
+        <button class="btn sm" data-tab="ex">Übungen</button>
+        <button class="btn sm" data-tab="ses">Trainings</button>
+      </div>
+      <div id="trashList"></div>`,
+    footer: `<button class="btn danger" data-empty>Papierkorb leeren</button><button class="btn ghost" data-x>Schließen</button>`,
+    onMount: (m, close) => {
+      const listEl = $('#trashList', m);
+      function draw() {
+        $$('[data-tab]', m).forEach(b => b.classList.toggle('primary', b.dataset.tab === tab));
+        if (tab === 'ex') {
+          const items = DB.trashedExercises();
+          listEl.innerHTML = items.length ? items.map(e => `<div class="list-row">
+              <div class="grow"><div class="r-title">${esc(e.name)}</div><div class="r-sub">gelöscht am ${fmtTs(e.deletedAt)}</div></div>
+              <button class="btn ghost sm" data-restore="${e.id}" title="Wiederherstellen">↩️</button>
+              <button class="btn danger sm" data-purge="${e.id}" title="Endgültig löschen">🗑️</button>
+            </div>`).join('') : `<div class="tiny muted center" style="padding:12px">Papierkorb leer.</div>`;
+        } else {
+          const items = DB.trashedSessions();
+          listEl.innerHTML = items.length ? items.map(s => `<div class="list-row">
+              <div class="grow"><div class="r-title">${esc(s.dayName || 'Training')}</div><div class="r-sub">${fmtDate(s.date)} · gelöscht am ${fmtTs(s.deletedAt)}</div></div>
+              <button class="btn ghost sm" data-restoreses="${s.id}" title="Wiederherstellen">↩️</button>
+              <button class="btn danger sm" data-purgeses="${s.id}" title="Endgültig löschen">🗑️</button>
+            </div>`).join('') : `<div class="tiny muted center" style="padding:12px">Papierkorb leer.</div>`;
+        }
+        $$('[data-restore]', listEl).forEach(b => b.onclick = () => { DB.restoreExercise(b.dataset.restore); toast('Wiederhergestellt'); draw(); render(); });
+        $$('[data-purge]', listEl).forEach(b => b.onclick = async () => {
+          if (await confirmDialog('Endgültig löschen?', { danger: true, okText: 'Löschen' })) { DB.purgeTrashedExercise(b.dataset.purge); draw(); render(); }
+        });
+        $$('[data-restoreses]', listEl).forEach(b => b.onclick = () => { DB.restoreSession(b.dataset.restoreses); toast('Wiederhergestellt'); draw(); render(); });
+        $$('[data-purgeses]', listEl).forEach(b => b.onclick = async () => {
+          if (await confirmDialog('Endgültig löschen?', { danger: true, okText: 'Löschen' })) { DB.purgeTrashedSession(b.dataset.purgeses); draw(); render(); }
+        });
+      }
+      $$('[data-tab]', m).forEach(b => b.onclick = () => { tab = b.dataset.tab; draw(); });
+      $('[data-empty]', m).onclick = async () => {
+        if (await confirmDialog('Papierkorb komplett leeren? Das kann nicht rückgängig gemacht werden.', { danger: true, okText: 'Leeren' })) { DB.emptyTrash(); draw(); render(); }
+      };
+      $('[data-x]', m).onclick = close;
+      draw();
+    },
+  });
+}
+
 // ============================================================
 //  Ansicht: Einstellungen / Backup
 // ============================================================
 route('/settings', () => {
-  setChrome({ title: 'Einstellungen', back: true });
+  setChrome({ title: 'Einstellungen', back: false });
   const s = DB.db().settings;
   const stats = { ex: DB.exercises().length, loc: DB.locations().length, plans: DB.db().plans.length, days: DB.db().days.length, ses: DB.sessions().length };
-  appEl.innerHTML = `
-    <div class="section-title">Standardwerte</div>
-    <div class="card">
-      <label class="field" style="margin:0"><span>Standard-Pausenzeit (s)</span>
-        <input id="s-rest" type="number" min="0" step="5" value="${s.defaultRestSec}" /></label>
-      <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
-        <input id="s-sound" type="checkbox" ${s.soundOnRestEnd ? 'checked' : ''} style="width:auto" />
-        <span style="margin:0">Ton/Vibration am Pausenende</span></label>
-    </div>
+  const trashCount = DB.trashedExercises().length + DB.trashedSessions().length;
 
-    <div class="section-title">Anzeige</div>
+  appEl.innerHTML = `
+    <div class="section-title">Design</div>
     <div class="card">
-      <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
+      <label class="field" style="margin:0"><span>Theme</span></label>
+      <div class="theme-pick" id="s-theme-pick">
+        ${THEMES.map(t => `<button type="button" data-theme="${t.id}" class="${t.id === s.theme ? 'sel' : ''}">${t.emoji} ${t.label}</button>`).join('')}
+      </div>
+      <label class="field" style="margin:14px 0 0"><span>Akzentfarbe</span></label>
+      <div class="color-pick" id="s-accent-pick">
+        ${COLORS.map(c => `<button type="button" data-c="${c}" style="background:${c}" class="${c === s.accentColor ? 'sel' : ''}"></button>`).join('')}
+      </div>
+      <label class="field" style="margin:14px 0 0"><span>Schriftgröße</span>
+        <select id="s-fontsize">
+          <option value="small" ${s.fontSize === 'small' ? 'selected' : ''}>Klein</option>
+          <option value="medium" ${s.fontSize === 'medium' ? 'selected' : ''}>Mittel</option>
+          <option value="large" ${s.fontSize === 'large' ? 'selected' : ''}>Groß</option>
+        </select></label>
+      <label class="field" style="margin:14px 0 0;display:flex;align-items:center;gap:10px">
+        <input id="s-reduced" type="checkbox" ${s.reducedMotion ? 'checked' : ''} style="width:auto" />
+        <span style="margin:0">Animationen reduzieren</span></label>
+      <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
         <input id="s-tagcolors" type="checkbox" ${s.tagColors ? 'checked' : ''} style="width:auto" />
         <span style="margin:0">Farbige Muskel-/Geräte-Labels</span></label>
       <p class="tiny muted" style="margin:8px 0 0">Muskelgruppen in Blau, Geräte-Arten in Grün – in Bibliothek und Training. Ausgeschaltet erscheinen alle Labels neutral grau.</p>
+    </div>
+
+    <div class="section-title">Training</div>
+    <div class="card">
+      <div class="row3">
+        <label class="field"><span>Standard-Sätze</span><input id="s-defsets" type="number" min="1" value="${s.defaultSets}" /></label>
+        <label class="field"><span>Standard-Wdh.</span><input id="s-defreps" type="number" min="1" value="${s.defaultReps}" /></label>
+        <label class="field"><span>Standard-Pause (s)</span><input id="s-rest" type="number" min="0" step="5" value="${s.defaultRestSec}" /></label>
+      </div>
+      <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
+        <input id="s-sound" type="checkbox" ${s.soundOnRestEnd ? 'checked' : ''} style="width:auto" />
+        <span style="margin:0">Ton/Vibration am Pausenende</span></label>
+      <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
+        <input id="s-notif" type="checkbox" ${s.restNotifications ? 'checked' : ''} style="width:auto" />
+        <span style="margin:0">Browser-Benachrichtigung am Pausenende</span></label>
+      <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
+        <input id="s-diff" type="checkbox" ${s.askPlanDiff ? 'checked' : ''} style="width:auto" />
+        <span style="margin:0">Nach dem Training nach Planänderungen fragen</span></label>
+      <label class="field" style="margin:12px 0 0"><span>Wochenstart im Kalender</span>
+        <select id="s-weekstart">
+          <option value="mon" ${s.weekStart === 'mon' ? 'selected' : ''}>Montag</option>
+          <option value="sun" ${s.weekStart === 'sun' ? 'selected' : ''}>Sonntag</option>
+        </select></label>
     </div>
 
     <div class="section-title">Daten & Backup</div>
     <div class="card">
       <p class="tiny muted" style="margin-top:0">Alle Daten liegen <b>lokal auf diesem Gerät</b> (im Browser). Es gibt keinen Server. Erstelle regelmäßig ein Backup!</p>
       <div class="tiny muted">${stats.loc} Orte · ${stats.plans} Pläne · ${stats.days} Trainingstage · ${stats.ex} Übungen · ${stats.ses} Einheiten</div>
+      <label class="field" style="margin:12px 0 0"><span>Backup-Erinnerung</span>
+        <select id="s-backupremind">
+          <option value="0" ${!s.backupReminderWeeks ? 'selected' : ''}>Aus</option>
+          <option value="1" ${s.backupReminderWeeks === 1 ? 'selected' : ''}>Wöchentlich</option>
+          <option value="2" ${s.backupReminderWeeks === 2 ? 'selected' : ''}>Alle 2 Wochen</option>
+          <option value="4" ${s.backupReminderWeeks === 4 ? 'selected' : ''}>Monatlich</option>
+        </select></label>
+      ${s.lastBackupAt ? `<p class="tiny muted" style="margin:8px 0 0">Letztes Backup: ${fmtTs(s.lastBackupAt)}</p>` : ''}
       <div class="btn-row" style="margin-top:12px">
         <button class="btn primary" id="expBtn">⬇ Backup exportieren</button>
         <button class="btn" id="impBtn">⬆ Importieren</button>
       </div>
       <input type="file" id="impFile" accept="application/json,.json" hidden />
+    </div>
+
+    <div class="section-title">Papierkorb</div>
+    <div class="card">
+      <p class="tiny muted" style="margin-top:0">Gelöschte Übungen und Trainings bleiben hier, bis du sie wiederherstellst oder endgültig entfernst.</p>
+      <div class="tiny muted">${trashCount} Einträge im Papierkorb</div>
+      <button class="btn ghost block" id="openTrashBtn" style="margin-top:10px">Papierkorb öffnen</button>
     </div>
 
     <div class="section-title">Gefahrenzone</div>
@@ -1490,15 +1891,41 @@ route('/settings', () => {
     <p class="tiny muted center" style="margin-top:14px">Trainingsplan · lokale PWA · v1</p>
   `;
 
-  $('#s-rest', appEl).onchange = e => { s.defaultRestSec = Math.max(0, parseInt(e.target.value) || 0); DB.save(); };
-  $('#s-sound', appEl).onchange = e => { s.soundOnRestEnd = e.target.checked; DB.save(); };
+  $$('#s-theme-pick button', appEl).forEach(b => b.onclick = () => {
+    s.theme = b.dataset.theme; DB.save(); applyDisplaySettings();
+    $$('#s-theme-pick button', appEl).forEach(x => x.classList.remove('sel')); b.classList.add('sel');
+  });
+  $$('#s-accent-pick button', appEl).forEach(b => b.onclick = () => {
+    s.accentColor = b.dataset.c; DB.save(); applyDisplaySettings();
+    $$('#s-accent-pick button', appEl).forEach(x => x.classList.remove('sel')); b.classList.add('sel');
+  });
+  $('#s-fontsize', appEl).onchange = e => { s.fontSize = e.target.value; DB.save(); applyDisplaySettings(); };
+  $('#s-reduced', appEl).onchange = e => { s.reducedMotion = e.target.checked; DB.save(); applyDisplaySettings(); };
   $('#s-tagcolors', appEl).onchange = e => { s.tagColors = e.target.checked; DB.save(); };
 
+  $('#s-defsets', appEl).onchange = e => { s.defaultSets = Math.max(1, parseInt(e.target.value) || 1); DB.save(); };
+  $('#s-defreps', appEl).onchange = e => { s.defaultReps = Math.max(1, parseInt(e.target.value) || 1); DB.save(); };
+  $('#s-rest', appEl).onchange = e => { s.defaultRestSec = Math.max(0, parseInt(e.target.value) || 0); DB.save(); };
+  $('#s-sound', appEl).onchange = e => { s.soundOnRestEnd = e.target.checked; DB.save(); };
+  $('#s-diff', appEl).onchange = e => { s.askPlanDiff = e.target.checked; DB.save(); };
+  $('#s-weekstart', appEl).onchange = e => { s.weekStart = e.target.value; DB.save(); };
+  $('#s-notif', appEl).onchange = async e => {
+    if (e.target.checked) {
+      if (!('Notification' in window)) { toast('Benachrichtigungen werden von diesem Browser nicht unterstützt'); e.target.checked = false; return; }
+      let perm = Notification.permission;
+      if (perm === 'default') perm = await Notification.requestPermission();
+      if (perm !== 'granted') { toast('Berechtigung nicht erteilt'); e.target.checked = false; return; }
+    }
+    s.restNotifications = e.target.checked; DB.save();
+  };
+
+  $('#s-backupremind', appEl).onchange = e => { s.backupReminderWeeks = parseInt(e.target.value) || 0; DB.save(); };
   $('#expBtn', appEl).onclick = () => {
     const blob = new Blob([DB.exportData()], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = el('a', { href: url, download: `trainingsplan-backup-${DB.todayISO()}.json` });
     document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    s.lastBackupAt = Date.now(); DB.save();
     toast('Backup exportiert');
   };
   const impFile = $('#impFile', appEl);
@@ -1507,13 +1934,16 @@ route('/settings', () => {
     const file = impFile.files[0]; if (!file) return;
     const text = await file.text();
     const mode = await confirmDialog('Backup importieren: Bestehende Daten ERSETZEN? (Abbrechen = zusammenführen)', { okText: 'Ersetzen' });
-    try { DB.importData(text, mode ? 'replace' : 'merge'); toast('Import erfolgreich'); render(); }
+    try { DB.importData(text, mode ? 'replace' : 'merge'); toast('Import erfolgreich'); applyDisplaySettings(); render(); }
     catch (e) { toast('Import fehlgeschlagen: ' + e.message); }
     impFile.value = '';
   };
+
+  $('#openTrashBtn', appEl).onclick = () => openTrashModal();
+
   $('#wipeBtn', appEl).onclick = async () => {
     if (await confirmDialog('Wirklich ALLE Daten unwiderruflich löschen?', { danger: true, okText: 'Alles löschen' })) {
-      DB.wipeAll(); toast('Alle Daten gelöscht'); navigate('/plans');
+      DB.wipeAll(); applyDisplaySettings(); toast('Alle Daten gelöscht'); navigate('/plans');
     }
   };
 });
@@ -1754,12 +2184,23 @@ function ensureSeed() {
   }
 }
 
+// Erinnert einmalig pro Start an ein Backup, falls in den Einstellungen aktiviert
+// und das letzte Backup lange genug her ist (oder noch nie gemacht wurde).
+function checkBackupReminder() {
+  const s = DB.db().settings;
+  if (!s.backupReminderWeeks || !DB.db().plans.length) return;
+  const dueMs = s.backupReminderWeeks * 7 * 86400000;
+  if (Date.now() - (s.lastBackupAt || 0) > dueMs) toast('📦 Erinnerung: Zeit für ein Backup (Einstellungen → Daten)');
+}
+
 // ============================================================
 //  Start
 // ============================================================
 DB.db();
 ensureSeed();
+applyDisplaySettings();
 render();
+checkBackupReminder();
 
 // Service Worker (Offline / installierbar)
 if ('serviceWorker' in navigator) {

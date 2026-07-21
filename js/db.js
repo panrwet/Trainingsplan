@@ -21,15 +21,27 @@ const DEFAULT_EQUIPMENT = ['Langhantel', 'Kurzhantel', 'Maschine', 'Kabelzug', '
 
 const DEFAULTS = () => ({
   version: 1,
-  settings: { defaultRestSec: 90, soundOnRestEnd: true, seedVersion: 0, tagColors: true },
+  settings: {
+    // Training
+    defaultRestSec: 90, soundOnRestEnd: true, defaultSets: 3, defaultReps: 10,
+    weekStart: 'mon', askPlanDiff: true, restNotifications: false,
+    // Anzeige/Design
+    tagColors: true, theme: 'dark', accentColor: '#6c8cff', fontSize: 'medium', reducedMotion: false,
+    // Daten
+    backupReminderWeeks: 0, lastBackupAt: null,
+    // intern
+    seedVersion: 0,
+  },
   exercises: [],   // Bibliothek: {id,name,muscles[],equipment,notes,unit,createdAt}
   muscleGroups: DEFAULT_MUSCLES.map(name => ({ id: uid('mg'), name, createdAt: Date.now() })),   // {id,name,createdAt}
   equipmentTypes: DEFAULT_EQUIPMENT.map(name => ({ id: uid('eq'), name, createdAt: Date.now() })), // {id,name,createdAt}
   exerciseNotes: [], // Dauerhafte Geräte-/Einstellungs-Notiz je Übung UND Ort: {id,exerciseId,locationId,text,updatedAt}
   locations: [],   // Orte:        {id,name,emoji,color,createdAt}
   plans: [],       // Pläne:       {id,locationId,name,emoji,color,createdAt}
-  days: [],        // Trainingstage:{id,planId,name,emoji,color,order,exercises:[{id,exerciseId,sets,reps,restSec}],createdAt}
+  days: [],        // Trainingstage:{id,planId,name,emoji,color,order,exercises:[{id,exerciseId,sets,reps,restSec,groupId}],createdAt}
   sessions: [],    // Einheiten:   {id,locationId,planId,dayId,dayName,date,startedAt,finishedAt,emoji,color,note,entries:[...],planSnapshot:[...]}
+  trashExercises: [], // Papierkorb: gelöschte Übungen, {..exercise, deletedAt}
+  trashSessions: [],  // Papierkorb: gelöschte/verworfene Trainings, {..session, deletedAt}
 });
 
 let store = null;
@@ -74,13 +86,33 @@ export function addExercise(data) {
 export function updateExercise(id, patch) {
   const ex = getExercise(id); if (!ex) return; Object.assign(ex, patch); save(); return ex;
 }
+// Verschiebt die Übung in den Papierkorb (Wiederherstellbar), statt sie
+// endgültig zu löschen. Wird trotzdem aus allen Trainingstagen entfernt -
+// eine Wiederherstellung bringt die Übung nur in die Bibliothek zurück,
+// nicht automatisch in die Trainingstage, aus denen sie entfernt wurde.
 export function deleteExercise(id) {
   const d = db();
+  const ex = d.exercises.find(e => e.id === id);
+  if (!ex) return;
   d.exercises = d.exercises.filter(e => e.id !== id);
-  // Aus Trainingstagen entfernen
   d.days.forEach(day => { day.exercises = day.exercises.filter(x => x.exerciseId !== id); });
   d.exerciseNotes = d.exerciseNotes.filter(n => n.exerciseId !== id);
+  d.trashExercises.push({ ...ex, deletedAt: Date.now() });
   save();
+}
+export function trashedExercises() { return db().trashExercises.slice().sort((a, b) => b.deletedAt - a.deletedAt); }
+export function restoreExercise(id) {
+  const d = db();
+  const ex = d.trashExercises.find(e => e.id === id);
+  if (!ex) return null;
+  d.trashExercises = d.trashExercises.filter(e => e.id !== id);
+  const { deletedAt, ...restored } = ex;
+  d.exercises.push(restored);
+  save();
+  return restored;
+}
+export function purgeTrashedExercise(id) {
+  const d = db(); d.trashExercises = d.trashExercises.filter(e => e.id !== id); save();
 }
 // Wie oft wurde eine Übung in Einheiten genutzt (für Löschwarnung)
 export function exerciseUsage(id) {
@@ -258,7 +290,8 @@ export function reorderDays(planId, orderedIds) {
 // Übung innerhalb eines Trainingstags
 export function addExerciseToDay(dayId, exerciseId, opts = {}) {
   const day = getDay(dayId); if (!day) return;
-  const item = { id: uid('de'), exerciseId, sets: opts.sets ?? 3, reps: opts.reps ?? 10, restSec: opts.restSec ?? db().settings.defaultRestSec };
+  const s = db().settings;
+  const item = { id: uid('de'), exerciseId, sets: opts.sets ?? s.defaultSets, reps: opts.reps ?? s.defaultReps, restSec: opts.restSec ?? s.defaultRestSec, groupId: opts.groupId ?? null };
   day.exercises.push(item); save(); return item;
 }
 export function updateDayExercise(dayId, itemId, patch) {
@@ -273,6 +306,34 @@ export function removeDayExercise(dayId, itemId) {
 export function reorderDayExercises(dayId, orderedItemIds) {
   const day = getDay(dayId); if (!day) return;
   day.exercises.sort((a, b) => orderedItemIds.indexOf(a.id) - orderedItemIds.indexOf(b.id));
+  save();
+}
+
+// ---------- Supersätze/Zirkel (mehrere Übungen zu einer Gruppe verbinden) ----------
+// Gruppierte Übungen werden zu einem zusammenhängenden Block verschoben
+// (in der ursprünglichen relativen Reihenfolge der Auswahl) - ein Zirkel
+// muss lückenlos hintereinander stehen, sonst ergibt "keine Pause dazwischen"
+// keinen Sinn.
+export function groupExercises(dayId, itemIds) {
+  const day = getDay(dayId); if (!day || itemIds.length < 2) return;
+  const groupId = uid('grp');
+  const idSet = new Set(itemIds);
+  // Reihenfolge der Auswahl beibehalten (nicht die alte Listenreihenfolge)
+  const selected = itemIds.map(id => day.exercises.find(x => x.id === id)).filter(Boolean);
+  selected.forEach(item => { item.groupId = groupId; });
+  // Block an die Position des ersten ausgewählten Elements verschieben,
+  // alle anderen Elemente behalten ihre relative Reihenfolge.
+  const insertAt = day.exercises.findIndex(x => idSet.has(x.id));
+  const others = day.exercises.filter(x => !idSet.has(x.id));
+  const insertAtInOthers = day.exercises.slice(0, insertAt).filter(x => !idSet.has(x.id)).length;
+  others.splice(insertAtInOthers, 0, ...selected);
+  day.exercises = others;
+  save();
+  return groupId;
+}
+export function ungroupExercises(dayId, groupId) {
+  const day = getDay(dayId); if (!day) return;
+  day.exercises.forEach(x => { if (x.groupId === groupId) x.groupId = null; });
   save();
 }
 
@@ -298,6 +359,7 @@ export function startSession(dayId) {
       targetReps: item.reps,
       targetSets: item.sets,
       restSec: item.restSec,
+      groupId: item.groupId || null,
       sets,
     };
   });
@@ -322,7 +384,32 @@ export function startSession(dayId) {
   db().sessions.push(s); save(); return s;
 }
 export function updateSession(id, patch) { const s = getSession(id); if (s) { Object.assign(s, patch); save(); } return s; }
-export function deleteSession(id) { const d = db(); d.sessions = d.sessions.filter(s => s.id !== id); save(); }
+// Verschiebt das Training in den Papierkorb, statt es endgültig zu löschen.
+export function deleteSession(id) {
+  const d = db();
+  const s = d.sessions.find(x => x.id === id);
+  if (!s) return;
+  d.sessions = d.sessions.filter(x => x.id !== id);
+  d.trashSessions.push({ ...s, deletedAt: Date.now() });
+  save();
+}
+export function trashedSessions() { return db().trashSessions.slice().sort((a, b) => b.deletedAt - a.deletedAt); }
+export function restoreSession(id) {
+  const d = db();
+  const s = d.trashSessions.find(x => x.id === id);
+  if (!s) return null;
+  d.trashSessions = d.trashSessions.filter(x => x.id !== id);
+  const { deletedAt, ...restored } = s;
+  d.sessions.push(restored);
+  save();
+  return restored;
+}
+export function purgeTrashedSession(id) {
+  const d = db(); d.trashSessions = d.trashSessions.filter(x => x.id !== id); save();
+}
+export function emptyTrash() {
+  const d = db(); d.trashExercises = []; d.trashSessions = []; save();
+}
 
 // ---------- Anpassungen während des Trainings zurück in den Plan übernehmen ----------
 // Vergleicht den aktuellen Stand der Einheit mit dem Schnappschuss bei Trainingsstart
@@ -488,6 +575,40 @@ export function exercisesTrainedAtLocation(locationId) {
   return exercises().filter(e => ids.has(e.id));
 }
 
+// Trainingsvolumen je Muskelgruppe über einen Zeitraum (Standard: letzte 7 Tage),
+// optional auf einen Ort beschränkt. Summiert über ALLE Übungen, die die
+// jeweilige Muskelgruppe als Tag tragen (eine Übung kann in mehrere einzahlen).
+export function muscleVolumeStats(locationId = null, periodDays = 7) {
+  const cutoff = Date.now() - periodDays * 86400000;
+  const totals = {};
+  for (const s of db().sessions) {
+    if (locationId && s.locationId !== locationId) continue;
+    if (!s.finishedAt || s.finishedAt < cutoff) continue;
+    for (const entry of s.entries || []) {
+      const ex = getExercise(entry.exerciseId);
+      if (!ex || !ex.muscles || !ex.muscles.length) continue;
+      let vol = 0;
+      (entry.sets || []).forEach(set => { if (isWorkingDone(set)) vol += num(set.weight) * num(set.reps); });
+      if (!vol) continue;
+      ex.muscles.forEach(m => { totals[m] = (totals[m] || 0) + vol; });
+    }
+  }
+  return Object.entries(totals).map(([muscle, volume]) => ({ muscle, volume: Math.round(volume) })).sort((a, b) => b.volume - a.volume);
+}
+
+// Einfache Suche über Pläne, Trainingstage, Übungen und vergangene Trainings hinweg.
+export function globalSearch(query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return { plans: [], days: [], exercises: [], sessions: [] };
+  const d = db();
+  return {
+    plans: d.plans.filter(p => p.name.toLowerCase().includes(q)),
+    days: d.days.filter(day => day.name.toLowerCase().includes(q)),
+    exercises: d.exercises.filter(e => e.name.toLowerCase().includes(q)),
+    sessions: d.sessions.filter(s => (s.dayName || '').toLowerCase().includes(q)).slice(0, 20),
+  };
+}
+
 // ---------- Kalender ----------
 // Map: 'YYYY-MM-DD' -> [ {emoji,color,name,sessionId} ... ]
 export function sessionsByDate() {
@@ -510,7 +631,7 @@ export function importData(json, mode = 'replace') {
     store = Object.assign(DEFAULTS(), incoming);
   } else { // merge
     const d = db();
-    ['exercises', 'locations', 'plans', 'days', 'sessions'].forEach(k => {
+    ['exercises', 'locations', 'plans', 'days', 'sessions', 'trashExercises', 'trashSessions'].forEach(k => {
       const existing = new Set(d[k].map(x => x.id));
       (incoming[k] || []).forEach(x => { if (!existing.has(x.id)) d[k].push(x); });
     });
