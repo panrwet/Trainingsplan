@@ -1302,6 +1302,12 @@ function renderTrain(container, id) {
 
   const finishBtn = $('#finishBtn', container);
   if (finishBtn) finishBtn.onclick = async () => {
+    const hasLoggedSet = s.entries.some(e => (e.sets || []).some(DB.isWorkingDone));
+    if (!hasLoggedSet) {
+      const action = await emptyTrainingFinishModal();
+      if (action === 'discard') { DB.deleteSession(id); stopRest(); toast('Training verworfen'); navigate('/plans'); return; }
+      if (action !== 'save') return;
+    }
     if (DB.db().settings.askPlanDiff) {
       const diffs = DB.computeSessionPlanDiff(id);
       if (diffs.length) await planDiffModal(id, diffs);
@@ -1736,6 +1742,22 @@ function beep() {
 function discardSession(id) {
   confirmDialog('Dieses Training verwerfen und löschen?', { danger: true, okText: 'Verwerfen' }).then(ok => {
     if (ok) { DB.deleteSession(id); stopRest(); navigate('/plans'); }
+  });
+}
+
+// Beim Beenden ohne einen einzigen abgehakten Satz: nachfragen statt stillschweigend
+// ein leeres Training abzuspeichern (z.B. versehentlich gestartet und direkt beendet).
+function emptyTrainingFinishModal() {
+  return new Promise(resolve => {
+    openModal({
+      title: 'Keine Sätze abgehakt',
+      body: `<p style="margin:0">Du hast in diesem Training noch keinen einzigen Satz abgehakt. Trotzdem als abgeschlossen speichern, oder das Training verwerfen?</p>`,
+      footer: `<button class="btn danger" data-discard>Verwerfen</button><button class="btn primary" data-save>Speichern</button>`,
+      onMount: (m, close) => {
+        $('[data-discard]', m).onclick = () => { close(); resolve('discard'); };
+        $('[data-save]', m).onclick = () => { close(); resolve('save'); };
+      },
+    });
   });
 }
 
