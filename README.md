@@ -30,6 +30,17 @@ Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – instal
 - **Einstellungen** – eigener Reiter unten mit Design (mehrere **Themes**: Dunkel, Hell, OLED Schwarz, Mitternachtsblau, Wald, Kontrast, oder „System"; Akzentfarbe, Schriftgröße, Animationen reduzieren), Trainings-Standardwerten, Backup-Erinnerung und Papierkorb/Gefahrenzone.
 - **Backup** – Export/Import als JSON-Datei.
 
+## PPL A/B – wissenschaftliche Grundlage
+
+Der mitgelieferte Plan „PPL A/B" (6 Trainingstage: Push A/B, Pull A/B, Legs A/B) orientiert sich an aktueller Trainingswissenschaft für Muskelaufbau:
+
+- **Frequenz 2×/Woche je Muskelgruppe** – A/B-Tage treffen dieselbe Muskelgruppe zweimal pro Woche mit unterschiedlichen Übungen/Winkeln. Aktuelle Meta-Analysen (u. a. Schoenfeld et al.) zeigen: Bei gleichem Wochenvolumen ist 2× einer höheren oder niedrigeren Frequenz mindestens gleichwertig, oft leicht überlegen.
+- **Wochenvolumen 10-20 Sätze je Muskelgruppe** – der in Dosis-Wirkungs-Metaanalysen am besten abgesicherte Bereich für Hypertrophie (bei <5 Sätzen/Woche deutlich weniger Wachstum, ab >20 Sätzen abnehmender Grenznutzen). Rücken bekommt bewusst etwas mehr (er gilt als besonders ermüdungsresistente, langsam wachsende Muskelgruppe mit hoher Arbeitskapazität).
+- **Verbundübungen zuerst** – schwere Grundübungen (Kniebeuge, Kreuzheben, Bankdrücken, Klimmzüge/Rudern) am Anfang jeder Einheit, während die Kraft noch frisch ist; Isolationsübungen danach.
+- **Wiederholungsbereiche** – 6-8 Wdh. bei schweren Grundübungen (mechanische Spannung + Kraftaufbau, weniger Ermüdung fürs restliche Training), 10-15 bei den meisten Isolationsübungen, 15-20 bei kleinen/verletzungsanfälligen Strukturen (Facepulls, Wadenheben) – aktuelle Forschung zeigt, dass Hypertrophie über einen breiten Wiederholungsbereich funktioniert, solange nah am Muskelversagen trainiert wird; die App zielt auf 0-3 Wiederholungen Reserve (RIR) je Satz.
+- **Pausenzeiten** – 120-180s bei schweren Grundübungen (bessere Kraft- UND Hypertrophie-Ergebnisse als kurze Pausen laut Vergleichsstudien), 60-100s bei Isolationsübungen.
+- **A/B-Varianten statt Wiederholung** – z. B. Schrägbankdrücken mit Langhantel (Tag B, schwer) vs. Kurzhantel (Tag A, mehr Bewegungsfreiheit) statt zweimal derselben Übung – deckt dieselbe Muskelgruppe aus unterschiedlichen Winkeln ab, was die Literatur als sinnvoll für vollständigere Entwicklung ansieht, ohne die Einheiten unnötig in die Länge zu ziehen.
+
 ## Warum diese Statistiken?
 
 Für Krafttraining sind das die aussagekräftigsten Kennzahlen:

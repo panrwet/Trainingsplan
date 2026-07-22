@@ -2608,54 +2608,60 @@ const PPL_PLAN = {
   ] },
 };
 
-// Push/Pull/Legs mit A/B-Tagen (6 Tage, zweimal pro Woche pro Kategorie mit
-// unterschiedlicher Übungsauswahl für mehr Abwechslung/Übungsvielfalt).
+// "PPL A/B" - 6-Tage-Split (2× pro Woche je Muskelgruppe über A/B-Varianten),
+// nach aktueller Trainingswissenschaft ausgelegt (siehe README, Abschnitt
+// "PPL A/B – wissenschaftliche Grundlage"): 10-20 (Rücken bis ~25) Sätze je
+// Muskelgruppe/Woche, Verbundübungen zuerst, moderate Wdh.-Bereiche (6-8) bei
+// schweren Grundübungen für Kraft+Volumen, höhere Wdh. (12-20) bei Isolation
+// für zusätzliches Volumen ohne unnötige Gelenkbelastung, A/B-Varianten aus
+// unterschiedlichen Winkeln/Griffen für breitere Reizabdeckung derselben
+// Muskelgruppe statt reiner Wiederholung.
 const PPL_AB_PLAN = {
   'Push A': { emoji: '🔴A', color: '#ff6b6b', exercises: [
     ['bankdruecken-lh', 4, 7, 150],
-    ['schulterdruecken-kh', 3, 9, 120],
-    ['schraegbankdruecken-kh', 3, 11, 100],
-    ['seitheben-kh', 3, 14, 60],
+    ['schraegbankdruecken-kh', 3, 10, 100],
+    ['schulterdruecken-lh', 3, 8, 120],
+    ['seitheben-kabel', 3, 14, 60],
     ['trizepsdruecken-kabel', 3, 11, 60],
-    ['dips-brust', 3, 10, 90],
+    ['dips-trizeps', 2, 10, 90],
   ] },
   'Push B': { emoji: '🔴B', color: '#ff6b6b', exercises: [
     ['schraegbankdruecken-lh', 4, 7, 150],
-    ['schulterdruecken-lh', 3, 9, 120],
-    ['bankdruecken-mp', 3, 11, 100],
-    ['frontheben-kh', 3, 14, 60],
-    ['enges-bankdruecken', 3, 8, 100],
-    ['trizeps-ueberkopf-kh', 3, 11, 60],
+    ['bankdruecken-kh', 3, 10, 100],
+    ['arnold-press', 3, 10, 100],
+    ['seitheben-kh', 3, 14, 60],
+    ['french-press-lh', 3, 11, 60],
+    ['trizeps-kickbacks', 2, 14, 60],
   ] },
   'Pull A': { emoji: '🔵A', color: '#4cc9f0', exercises: [
-    ['kreuzheben', 3, 5, 180],
-    ['klimmzuege', 3, 8, 120],
+    ['klimmzuege', 4, 8, 120],
     ['rudern-vorgebeugt', 3, 9, 120],
     ['rudern-sitzend-eng', 3, 11, 90],
     ['facepulls', 3, 17, 60],
-    ['bizepscurls-lh', 3, 11, 60],
+    ['bizepscurls-lh', 3, 10, 60],
+    ['hammercurls-kh', 2, 11, 60],
   ] },
   'Pull B': { emoji: '🔵B', color: '#4cc9f0', exercises: [
-    ['rumaenisches-kreuzheben', 3, 9, 150],
-    ['latzug-breit', 3, 9, 120],
-    ['t-bar-rudern', 3, 9, 120],
-    ['reverse-butterfly', 3, 14, 60],
-    ['hammercurls-kh', 3, 11, 60],
+    ['rudern-sitzend-weit', 4, 9, 120],
+    ['latzug-neutral', 3, 11, 100],
+    ['rudern-einarmig', 3, 11, 90],
+    ['reverse-butterfly', 3, 17, 60],
     ['bizepscurls-kh', 3, 11, 60],
+    ['scott-curls-lh', 2, 11, 60],
   ] },
   'Legs A': { emoji: '🟢A', color: '#46c98b', exercises: [
     ['kniebeuge', 4, 7, 180],
     ['beinpresse', 3, 11, 120],
-    ['beinbeuger-liegend', 3, 11, 90],
-    ['ausfallschritte-kh', 3, 11, 90],
+    ['rumaenisches-kreuzheben', 3, 9, 120],
+    ['beinstrecker', 3, 13, 90],
     ['wadenheben-stehend', 4, 14, 60],
   ] },
   'Legs B': { emoji: '🟢B', color: '#46c98b', exercises: [
-    ['kniebeuge-mp', 4, 9, 150],
-    ['bulgarian-split-squat', 3, 11, 90],
-    ['beinstrecker', 3, 14, 90],
-    ['hip-thrust-lh', 3, 11, 120],
-    ['wadenheben-sitzend', 4, 18, 60],
+    ['kreuzheben', 3, 5, 180],
+    ['bulgarian-split-squat', 3, 11, 100],
+    ['beinbeuger-liegend', 3, 11, 90],
+    ['hip-thrust-lh', 3, 11, 100],
+    ['wadenheben-sitzend', 4, 17, 60],
   ] },
 };
 
@@ -2724,7 +2730,7 @@ function seedInitialContent() {
   };
 
   buildPlan('Push Pull Legs', '🔄', PPL_PLAN);
-  buildPlan('Push Pull Legs (A/B)', '🔁', PPL_AB_PLAN);
+  buildPlan('PPL A/B', '🔁', PPL_AB_PLAN);
   buildPlan('Beedle', '📓', BEEDLE_PLAN);
 
   DB.setActiveLocation(loc.id);
