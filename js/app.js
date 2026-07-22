@@ -908,10 +908,12 @@ route('/library', () => {
     $('#libCount', appEl).textContent = `${items.length} von ${list.length} Übungen`;
     listEl.innerHTML = items.length ? items.map(e => {
       const uses = DB.exerciseUsage(e.id);
+      const lastDate = DB.lastTrainedDate(e.id);
+      const usesLine = uses ? `${uses}× trainiert${lastDate ? ' · zuletzt am ' + fmtDate(lastDate) : ''}` : '';
       return `<div class="list-row" data-ex="${e.id}">
         <div class="grow"><div class="r-title">${esc(e.name)}</div>
           ${tagBadgesHTML(e)}
-          ${uses ? `<div class="r-sub">${uses}× trainiert</div>` : ''}</div>
+          ${usesLine ? `<div class="r-sub">${usesLine}</div>` : ''}</div>
         <button class="btn ghost sm" data-edit="${e.id}">✏️</button>
         <span class="arrow" data-stats="${e.id}">📈</span></div>`;
     }).join('') : `<div class="empty"><div>Keine Übung passt zum Filter.</div></div>`;
@@ -1823,11 +1825,19 @@ function drawCalendar() {
 function sessionRow(s) {
   const totalSets = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).length, 0);
   const vol = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).reduce((x, st) => x + DB.num(st.weight) * DB.num(st.reps), 0), 0);
+  const duration = s.startedAt && s.finishedAt ? fmtDuration(s.finishedAt - s.startedAt) : '';
   return `<div class="list-row" data-session="${s.id}">
     <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '💪')}</div>
     <div class="grow"><div class="r-title">${esc(s.dayName || 'Training')}</div>
-      <div class="r-sub">${fmtDate(s.date)} · ${totalSets} Sätze · ${fmtWeight(vol)} kg Vol.</div></div>
+      <div class="r-sub">${fmtDate(s.date)}${duration ? ' · ' + duration : ''} · ${totalSets} Sätze · ${fmtWeight(vol)} kg Vol.</div></div>
     <span class="arrow">›</span></div>`;
+}
+
+function fmtDuration(ms) {
+  const min = Math.round(ms / 60000);
+  if (min < 60) return `${min} Min.`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return `${h} Std. ${m} Min.`;
 }
 
 function currentStreak(byDate) {
@@ -1934,11 +1944,14 @@ route('/stats', () => {
   </details>`;
 
   const volStats = DB.muscleVolumeStats(active.id, statsPeriod);
+  const setsTrend = DB.weeklySetsTrend(active.id, 10);
+  const setsTrendChart = lineChart(setsTrend.map(b => ({ y: b.sets, label: fmtTs(b.weekEndTs) })), '');
   html += `<details class="stats-acc" data-acc="volume" ${statsAccOpen.volume ? 'open' : ''}><summary>Muskelgruppen-Sätze</summary>
     <div class="card">
       <p class="tiny muted" style="margin-top:0">Zählt abgehakte Sätze je Muskelgruppe (nicht Gewicht) – aussagekräftiger für den Trainingsreiz.</p>
       ${volumeBarsHTML(volStats)}
     </div>
+    <div class="chart-wrap"><div class="c-title"><span>Volumen-Trend (Sätze gesamt je Woche, letzte ${setsTrend.length})</span></div>${setsTrendChart}</div>
   </details>`;
 
   html += `<details class="stats-acc" data-acc="exercises" ${statsAccOpen.exercises ? 'open' : ''}><summary>Übungen</summary>`;

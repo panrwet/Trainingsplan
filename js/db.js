@@ -738,6 +738,39 @@ export function topExercisesByFrequency(locationId = null, periodDays = null, li
     .slice(0, limit);
 }
 
+// Trend der Muskelgruppen-Sätze über die Zeit (alle Muskelgruppen zusammen, je Woche) -
+// ergänzt die Momentaufnahme aus muscleVolumeStats() um eine Entwicklung über mehrere
+// Wochen (nimmt/steigt das Trainingsvolumen zu oder ab).
+export function weeklySetsTrend(locationId = null, weeks = 10) {
+  const now = Date.now();
+  const buckets = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const start = now - (i + 1) * 7 * 86400000;
+    const end = now - i * 7 * 86400000;
+    let sets = 0;
+    for (const s of db().sessions) {
+      if (locationId && s.locationId !== locationId) continue;
+      if (!s.finishedAt || s.finishedAt < start || s.finishedAt >= end) continue;
+      (s.entries || []).forEach(e => { sets += (e.sets || []).filter(isWorkingDone).length; });
+    }
+    buckets.push({ weekEndTs: end, sets });
+  }
+  return buckets;
+}
+
+// Datum des letzten ABGESCHLOSSENEN Trainings mit dieser Übung (für die "Zuletzt
+// trainiert"-Anzeige in der Übungsbibliothek) - ortübergreifend, da die Bibliothek
+// selbst ortübergreifend ist (nur ein Datum, keine ortsabhängigen Gewichtswerte).
+export function lastTrainedDate(exerciseId) {
+  let latest = null;
+  for (const s of db().sessions) {
+    if (!s.finishedAt) continue;
+    const hit = (s.entries || []).some(e => e.exerciseId === exerciseId && (e.sets || []).some(isWorkingDone));
+    if (hit && (!latest || s.finishedAt > latest.finishedAt)) latest = s;
+  }
+  return latest ? latest.date : null;
+}
+
 // ---------- Beispieldaten (Testdaten für die Statistik, in Einstellungen an/abschaltbar) ----------
 // Erzeugt ca. 2 Monate plausibler, abgeschlossener Trainingseinheiten am angegebenen Ort,
 // basierend auf dessen TATSÄCHLICHEN Plänen/Trainingstagen (damit Übungs-/Muskelgruppen-
