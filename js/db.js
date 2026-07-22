@@ -11,7 +11,7 @@ const KEY = 'trainingsplan.v1';
 // Push/Pull/Legs + Übungsbibliothek) neu befüllt. wipeAll() setzt seedVersion
 // direkt auf SEED_VERSION, damit ein manuelles "Alle Daten löschen" NICHT erneut
 // automatisch befüllt wird (nur diese eine automatische Migration tut das).
-export const SEED_VERSION = 3;
+export const SEED_VERSION = 4;
 
 // Muskelgruppen UND Geräte-Arten sind beide selbst verwaltbar (siehe
 // muscleGroups()/equipmentTypes() u.a. unten) - diese Listen sind nur der

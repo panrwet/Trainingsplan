@@ -2728,6 +2728,7 @@ function seedInitialContent() {
   buildPlan('Beedle', '📓', BEEDLE_PLAN);
 
   DB.setActiveLocation(loc.id);
+  DB.generateDemoSessions(loc.id);
 }
 
 // Einmalige Migration: alte (Test-/Demo-)Daten löschen und den kuratierten
