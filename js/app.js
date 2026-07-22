@@ -85,13 +85,17 @@ function wireSymbolColor(root) {
 }
 
 // ---------- Modal ----------
-function openModal({ title, body, onMount, footer }) {
+// onDismiss feuert NUR beim Schließen per Hintergrund-Klick (nicht bei einem
+// expliziten Footer-Button, der seine eigene close()/resolve()-Logik hat) -
+// wichtig für Promise-basierte Modals (confirmDialog, planDiffModal, ...),
+// deren Promise sonst beim Hintergrund-Klick nie aufgelöst würde.
+function openModal({ title, body, onMount, footer, onDismiss }) {
   const back = el('div', { class: 'modal-back' });
   const modal = el('div', { class: 'modal' });
   modal.innerHTML = `<h2>${esc(title)}</h2><div class="modal-body">${body}</div>`;
   if (footer) { const f = el('div', { class: 'btn-row', style: 'margin-top:16px' }); f.innerHTML = footer; modal.append(f); }
   back.append(modal);
-  back.addEventListener('click', e => { if (e.target === back) close(); });
+  back.addEventListener('click', e => { if (e.target === back) { if (onDismiss) onDismiss(); close(); } });
   modalRoot.append(back);
   function close() { back.remove(); }
   if (onMount) onMount(modal, close);
@@ -104,6 +108,7 @@ function confirmDialog(msg, { danger = false, okText = 'OK' } = {}) {
       title: 'Bestätigen',
       body: `<p style="margin:0 0 4px">${esc(msg)}</p>`,
       footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn ${danger ? 'danger' : 'primary'}" data-ok>${esc(okText)}</button>`,
+      onDismiss: () => resolve(false),
       onMount: (m, c) => {
         $('[data-x]', m).onclick = () => { c(); resolve(false); };
         $('[data-ok]', m).onclick = () => { c(); resolve(true); };
@@ -143,6 +148,16 @@ function withAlpha(hex, alpha) {
   const n = parseInt(String(hex).replace('#', ''), 16);
   return `rgba(${(n >> 16) & 0xff}, ${(n >> 8) & 0xff}, ${n & 0xff}, ${alpha})`;
 }
+// Liefert #000 oder #fff, je nachdem was auf der gegebenen Hintergrundfarbe besser
+// lesbar ist (relative Luminanz, W3C-Näherung) - nötig, da die Akzentfarbe frei
+// wählbar ist (auch helle Töne) und Text darauf sonst fest auf weiß gesetzt bei
+// hellem Akzent kaum lesbar wäre, unabhängig vom Theme.
+function readableOn(hex) {
+  const n = parseInt(String(hex).replace('#', ''), 16);
+  const r = (n >> 16) & 0xff, g = (n >> 8) & 0xff, b = n & 0xff;
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? '#000' : '#fff';
+}
 const CORNER_RADII = { sharp: ['4px', '3px'], normal: ['12px', '9px'], round: ['20px', '16px'] };
 function applyDisplaySettings() {
   const s = DB.db().settings;
@@ -157,6 +172,11 @@ function applyDisplaySettings() {
   const accent = s.accentColor || '#6c8cff';
   document.documentElement.style.setProperty('--accent', accent);
   document.documentElement.style.setProperty('--accent-2', shade(accent, -0.22));
+  const accentN = parseInt(accent.replace('#', ''), 16);
+  document.documentElement.style.setProperty('--accent-rgb', `${(accentN >> 16) & 0xff}, ${(accentN >> 8) & 0xff}, ${accentN & 0xff}`);
+  const onAccent = readableOn(accent);
+  document.documentElement.style.setProperty('--on-accent', onAccent);
+  document.documentElement.style.setProperty('--on-accent-overlay', onAccent === '#000' ? 'rgba(0,0,0,.15)' : 'rgba(255,255,255,.2)');
   const muscleColor = s.muscleColor || '#7dd3fc';
   const equipColor = s.equipColor || '#86efac';
   document.documentElement.style.setProperty('--muscle-color', muscleColor);
@@ -811,9 +831,13 @@ function editDayExerciseModal(dayId, itemId) {
 function pickExerciseModal(onPick, excludeIds = []) {
   const list = DB.exercises();
   const excludeSet = new Set(excludeIds);
+  // Eigene, frische Filter-Instanz je Aufruf (statt des geteilten /library-Filters
+  // exFilter) - ein z.B. in der Bibliothek aktiver Muskel-/Gerätefilter soll hier
+  // nicht unbemerkt weiter eingeschränkt anzeigen.
+  const pickFilter = { muscles: new Set(), equipment: new Set(), matchMode: 'or' };
   const body = `
     <input id="f-search" placeholder="Übung suchen …" style="margin-bottom:10px" />
-    ${exerciseFilterHTML()}
+    ${exerciseFilterHTML(pickFilter)}
     <button class="btn primary block" id="newEx" style="margin:12px 0">+ Neue Übung anlegen</button>
     <div id="exList"></div>`;
   openModal({
@@ -822,7 +846,7 @@ function pickExerciseModal(onPick, excludeIds = []) {
     onMount: (m, close) => {
       const listEl = $('#exList', m);
       const draw = (q = '') => {
-        const items = applyExerciseFilter(list).filter(e => !q || e.name.toLowerCase().includes(q.toLowerCase()));
+        const items = applyExerciseFilter(list, pickFilter).filter(e => !q || e.name.toLowerCase().includes(q.toLowerCase()));
         listEl.innerHTML = items.length ? items.map(e => {
           const dup = excludeSet.has(e.id);
           return `<div class="list-row ${dup ? 'disabled' : ''}" ${dup ? '' : `data-pick="${e.id}"`}>
@@ -834,7 +858,7 @@ function pickExerciseModal(onPick, excludeIds = []) {
         $$('[data-pick]', listEl).forEach(n => n.onclick = () => { close(); onPick(n.dataset.pick); });
       };
       draw();
-      wireExerciseFilter(m, () => draw($('#f-search', m).value));
+      wireExerciseFilter(m, () => draw($('#f-search', m).value), pickFilter);
       $('#f-search', m).oninput = e => draw(e.target.value);
       $('#newEx', m).onclick = () => { close(); editExerciseModal(null, newId => onPick(newId)); };
     },
@@ -863,23 +887,28 @@ function tagBadgesHTML(ex) {
 let exFilter = { muscles: new Set(), equipment: new Set(), matchMode: 'or' };
 
 // Gemeinsame Filter-UI (Muskelgruppe/Gerät-Chips + UND/ODER-Umschalter), wird sowohl
-// in /library als auch in pickExerciseModal eingebettet.
-function exerciseFilterHTML() {
+// in /library als auch in pickExerciseModal eingebettet. Nimmt den Filter-Zustand
+// als Parameter (Default: das geteilte /library-exFilter) - pickExerciseModal
+// übergibt bewusst eine EIGENE, frische Instanz statt exFilter mitzubenutzen, damit
+// ein z.B. in der Bibliothek aktiver Filter nicht unbemerkt in den Übungs-Picker
+// beim Trainingstag/laufenden Training durchschlägt (dort will man i.d.R. wieder
+// alle Übungen sehen, nicht die zuletzt in der Bibliothek gewählte Einschränkung).
+function exerciseFilterHTML(filterState = exFilter) {
   const muscleList = DB.muscleGroups();
   const equipList = DB.equipmentTypes();
   return `
-    <details class="filter-acc"${exFilter.muscles.size ? ' open' : ''}>
-      <summary>Muskelgruppe${exFilter.muscles.size ? `<span class="acc-badge">${exFilter.muscles.size}</span>` : ''}</summary>
-      <div class="filter-row" id="filterMuscles">${muscleList.map(m => `<button type="button" class="filter-chip ${exFilter.muscles.has(m.name) ? 'sel' : ''}" data-fm="${esc(m.name)}">${esc(m.name)}</button>`).join('')}
+    <details class="filter-acc"${filterState.muscles.size ? ' open' : ''}>
+      <summary>Muskelgruppe${filterState.muscles.size ? `<span class="acc-badge">${filterState.muscles.size}</span>` : ''}</summary>
+      <div class="filter-row" id="filterMuscles">${muscleList.map(m => `<button type="button" class="filter-chip ${filterState.muscles.has(m.name) ? 'sel' : ''}" data-fm="${esc(m.name)}">${esc(m.name)}</button>`).join('')}
         <button type="button" class="filter-chip add" id="manageMgChip">⚙️ Verwalten</button></div>
       <div class="filter-row" style="margin-top:6px">
         <span class="tiny muted" style="align-self:center">Bei mehreren Muskeln:</span>
-        <button type="button" class="filter-chip ${exFilter.matchMode === 'and' ? 'sel' : ''}" id="matchModeChip">${exFilter.matchMode === 'and' ? 'UND (alle)' : 'ODER (mind. eine)'}</button>
+        <button type="button" class="filter-chip ${filterState.matchMode === 'and' ? 'sel' : ''}" id="matchModeChip">${filterState.matchMode === 'and' ? 'UND (alle)' : 'ODER (mind. eine)'}</button>
       </div>
     </details>
-    <details class="filter-acc"${exFilter.equipment.size ? ' open' : ''}>
-      <summary>Gerät${exFilter.equipment.size ? `<span class="acc-badge">${exFilter.equipment.size}</span>` : ''}</summary>
-      <div class="filter-row" id="filterEquip">${equipList.map(eq => `<button type="button" class="filter-chip ${exFilter.equipment.has(eq.name) ? 'sel' : ''}" data-fe="${esc(eq.name)}">${esc(eq.name)}</button>`).join('')}
+    <details class="filter-acc"${filterState.equipment.size ? ' open' : ''}>
+      <summary>Gerät${filterState.equipment.size ? `<span class="acc-badge">${filterState.equipment.size}</span>` : ''}</summary>
+      <div class="filter-row" id="filterEquip">${equipList.map(eq => `<button type="button" class="filter-chip ${filterState.equipment.has(eq.name) ? 'sel' : ''}" data-fe="${esc(eq.name)}">${esc(eq.name)}</button>`).join('')}
         <button type="button" class="filter-chip add" id="manageEqChip">⚙️ Verwalten</button></div>
     </details>`;
 }
@@ -887,41 +916,41 @@ function exerciseFilterHTML() {
 // Wire-Handler für exerciseFilterHTML() - redraw ist nur die Liste, nicht die
 // Filter-Chips selbst (die togglen ihren Zustand direkt per classList, ohne
 // Neu-Rendern - vermeidet Flackern/Fokusverlust in der Suche).
-function wireExerciseFilter(root, redraw) {
+function wireExerciseFilter(root, redraw, filterState = exFilter) {
   const mgChip = $('#manageMgChip', root); if (mgChip) mgChip.onclick = () => manageMuscleGroupsModal();
   const eqChip = $('#manageEqChip', root); if (eqChip) eqChip.onclick = () => manageEquipmentModal();
   $$('[data-fm]', root).forEach(b => b.onclick = () => {
     const m = b.dataset.fm;
-    exFilter.muscles.has(m) ? exFilter.muscles.delete(m) : exFilter.muscles.add(m);
+    filterState.muscles.has(m) ? filterState.muscles.delete(m) : filterState.muscles.add(m);
     b.classList.toggle('sel');
     redraw();
   });
   $$('[data-fe]', root).forEach(b => b.onclick = () => {
     const eq = b.dataset.fe;
-    exFilter.equipment.has(eq) ? exFilter.equipment.delete(eq) : exFilter.equipment.add(eq);
+    filterState.equipment.has(eq) ? filterState.equipment.delete(eq) : filterState.equipment.add(eq);
     b.classList.toggle('sel');
     redraw();
   });
   const modeChip = $('#matchModeChip', root);
   if (modeChip) modeChip.onclick = () => {
-    exFilter.matchMode = exFilter.matchMode === 'and' ? 'or' : 'and';
-    modeChip.textContent = exFilter.matchMode === 'and' ? 'UND (alle)' : 'ODER (mind. eine)';
-    modeChip.classList.toggle('sel', exFilter.matchMode === 'and');
+    filterState.matchMode = filterState.matchMode === 'and' ? 'or' : 'and';
+    modeChip.textContent = filterState.matchMode === 'and' ? 'UND (alle)' : 'ODER (mind. eine)';
+    modeChip.classList.toggle('sel', filterState.matchMode === 'and');
     redraw();
   };
 }
 
-// Wendet den aktuellen Muskel-/Geräte-Filter auf eine Übungsliste an (Suchtext wird
+// Wendet einen Muskel-/Geräte-Filter auf eine Übungsliste an (Suchtext wird
 // separat je Aufrufer gefiltert, da der Suchbegriff nicht geteilt werden soll).
-function applyExerciseFilter(list) {
+function applyExerciseFilter(list, filterState = exFilter) {
   return list.filter(e => {
-    if (exFilter.muscles.size) {
-      const sel = [...exFilter.muscles];
+    if (filterState.muscles.size) {
+      const sel = [...filterState.muscles];
       const has = m => (e.muscles || []).includes(m);
-      const ok = exFilter.matchMode === 'and' ? sel.every(has) : sel.some(has);
+      const ok = filterState.matchMode === 'and' ? sel.every(has) : sel.some(has);
       if (!ok) return false;
     }
-    if (exFilter.equipment.size && !exFilter.equipment.has(e.equipment)) return false;
+    if (filterState.equipment.size && !filterState.equipment.has(e.equipment)) return false;
     return true;
   });
 }
@@ -1391,6 +1420,7 @@ function planDiffModal(sessionId, diffs) {
       body: `<p class="tiny muted" style="margin-top:0">Du hast während des Trainings Änderungen vorgenommen. Sollen diese auch für „${esc(day?.name || 'diesen Trainingstag')}" gelten?</p>
         <div class="diff-list">${rows}</div>`,
       footer: `<button class="btn ghost" data-skip>Nur diesmal</button><button class="btn primary" data-apply>Übernehmen</button>`,
+      onDismiss: () => resolve(),
       onMount: (m, c) => {
         $('[data-skip]', m).onclick = () => { c(); resolve(); };
         $('[data-apply]', m).onclick = () => {
@@ -1800,6 +1830,7 @@ function emptyTrainingFinishModal() {
       title: 'Keine Sätze abgehakt',
       body: `<p style="margin:0">Du hast in diesem Training noch keinen einzigen Satz abgehakt. Trotzdem als abgeschlossen speichern, oder das Training verwerfen?</p>`,
       footer: `<button class="btn danger" data-discard>Verwerfen</button><button class="btn primary" data-save>Speichern</button>`,
+      onDismiss: () => resolve(null),
       onMount: (m, close) => {
         $('[data-discard]', m).onclick = () => { close(); resolve('discard'); };
         $('[data-save]', m).onclick = () => { close(); resolve('save'); };
@@ -2067,7 +2098,15 @@ route('/stats/:id', ({ id }) => {
   }
 
   const unit = ex.unit || 'kg';
-  const tiles = `
+  // Reine Körpergewichtsübungen (nie ein Gewicht eingetragen) haben immer
+  // e1RM/Max-Gewicht/Volumen = 0 - für die ist die Wiederholungszahl der
+  // aussagekräftige Fortschritts-Indikator statt Gewicht/Volumen-Charts voller
+  // Nullen. Datengetrieben geprüft (nicht am Geräte-Tag), damit z.B. gewichtete
+  // Klimmzüge/Dips automatisch die normale Gewichts-Statistik bekommen.
+  const hasWeightData = hist.some(h => h.maxWeight > 0);
+  const maxTotalReps = Math.max(...hist.map(h => h.totalReps));
+
+  const tiles = hasWeightData ? `
     <div class="streak-row">
       <div class="stat-tile"><div class="v">${fmtWeight(pr.best1rm)}</div><div class="l">Bestes e1RM (${esc(unit)})</div></div>
       <div class="stat-tile"><div class="v">${fmtWeight(pr.maxWeight)}</div><div class="l">Max Gewicht (${esc(unit)})</div></div>
@@ -2075,35 +2114,51 @@ route('/stats/:id', ({ id }) => {
     <div class="streak-row">
       <div class="stat-tile"><div class="v">${fmtWeight(pr.maxVolume)}</div><div class="l">Max Volumen</div></div>
       <div class="stat-tile"><div class="v">${pr.sessionsCount}</div><div class="l">Einheiten</div></div>
+    </div>` : `
+    <div class="streak-row">
+      <div class="stat-tile"><div class="v">${pr.maxReps}</div><div class="l">Beste Wdh. (ein Satz)</div></div>
+      <div class="stat-tile"><div class="v">${maxTotalReps}</div><div class="l">Max. Wdh. gesamt/Einheit</div></div>
+    </div>
+    <div class="streak-row">
+      <div class="stat-tile"><div class="v">${pr.sessionsCount}</div><div class="l">Einheiten</div></div>
     </div>`;
 
-  const e1rmChart = lineChart(hist.map(h => ({ y: h.est1rm, label: fmtShort(h.date) })), unit);
-  const volChart = lineChart(hist.map(h => ({ y: h.volume, label: fmtShort(h.date) })), '');
-  const wChart = lineChart(hist.map(h => ({ y: h.maxWeight, label: fmtShort(h.date) })), unit);
+  const charts = hasWeightData ? `
+    <div class="chart-wrap"><div class="c-title"><span>Geschätztes 1RM (Epley)</span><span>${fmtWeight(pr.best1rm)} ${esc(unit)}</span></div>${lineChart(hist.map(h => ({ y: h.est1rm, label: fmtShort(h.date) })), unit)}</div>
+    <div class="chart-wrap"><div class="c-title"><span>Max. Gewicht je Einheit</span><span>${fmtWeight(pr.maxWeight)} ${esc(unit)}</span></div>${lineChart(hist.map(h => ({ y: h.maxWeight, label: fmtShort(h.date) })), unit)}</div>
+    <div class="chart-wrap"><div class="c-title"><span>Volumen (${esc(unit)} gesamt)</span><span>${fmtWeight(pr.maxVolume)}</span></div>${lineChart(hist.map(h => ({ y: h.volume, label: fmtShort(h.date) })), '')}</div>` : `
+    <div class="chart-wrap"><div class="c-title"><span>Wiederholungen gesamt je Einheit</span><span>${maxTotalReps}</span></div>${lineChart(hist.map(h => ({ y: h.totalReps, label: fmtShort(h.date) })), '')}</div>`;
 
-  const rows = hist.slice().reverse().map(h => `<tr>
+  const rows = hist.slice().reverse().map(h => hasWeightData ? `<tr>
     <td>${fmtShort(h.date)}</td>
     <td>${h.setCount}</td>
     <td class="num">${fmtWeight(h.maxWeight)}</td>
     <td class="num">${h.bestSet ? fmtWeight(h.bestSet.weight) + '×' + h.bestSet.reps : '–'}</td>
     <td class="num">${fmtWeight(h.est1rm)}</td>
     <td class="num">${fmtWeight(h.volume)}</td>
+  </tr>` : `<tr>
+    <td>${fmtShort(h.date)}</td>
+    <td>${h.setCount}</td>
+    <td class="num">${h.bestSet ? h.bestSet.reps : '–'}</td>
+    <td class="num">${h.totalReps}</td>
   </tr>`).join('');
 
   appEl.innerHTML = `
     ${locLine}
     ${tiles}
-    <div class="chart-wrap"><div class="c-title"><span>Geschätztes 1RM (Epley)</span><span>${fmtWeight(pr.best1rm)} ${esc(unit)}</span></div>${e1rmChart}</div>
-    <div class="chart-wrap"><div class="c-title"><span>Max. Gewicht je Einheit</span><span>${fmtWeight(pr.maxWeight)} ${esc(unit)}</span></div>${wChart}</div>
-    <div class="chart-wrap"><div class="c-title"><span>Volumen (${esc(unit)} gesamt)</span><span>${fmtWeight(pr.maxVolume)}</span></div>${volChart}</div>
+    ${charts}
     <div class="section-title">Verlauf</div>
     <div class="card" style="overflow-x:auto;padding:6px 10px">
       <table class="hist">
-        <thead><tr><th>Datum</th><th>Sätze</th><th>Max</th><th>Bester Satz</th><th>e1RM</th><th>Vol.</th></tr></thead>
+        <thead>${hasWeightData
+          ? '<tr><th>Datum</th><th>Sätze</th><th>Max</th><th>Bester Satz</th><th>e1RM</th><th>Vol.</th></tr>'
+          : '<tr><th>Datum</th><th>Sätze</th><th>Beste Wdh.</th><th>Wdh. gesamt</th></tr>'}</thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="tiny muted">e1RM = geschätztes Einwiederholungsmaximum (Epley-Formel). Nur abgehakte Sätze fließen in die Statistik ein.</p>
+    <p class="tiny muted">${hasWeightData
+      ? 'e1RM = geschätztes Einwiederholungsmaximum (Epley-Formel). Nur abgehakte Sätze fließen in die Statistik ein.'
+      : 'Reine Körpergewichtsübung ohne eingetragenes Gewicht – Fortschritt zeigt sich hier über die Wiederholungszahl statt über Gewicht/Volumen. Nur abgehakte Sätze fließen in die Statistik ein.'}</p>
   `;
 });
 
@@ -2201,6 +2256,7 @@ function pickImportModeModal() {
       title: 'Backup importieren',
       body: `<p class="tiny muted" style="margin-top:0">Wie soll das Backup übernommen werden?</p>`,
       footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn" data-merge>Zusammenführen</button><button class="btn danger" data-replace>Ersetzen</button>`,
+      onDismiss: () => resolve(null),
       onMount: (m, c) => {
         $('[data-x]', m).onclick = () => { c(); resolve(null); };
         $('[data-merge]', m).onclick = () => { c(); resolve('merge'); };

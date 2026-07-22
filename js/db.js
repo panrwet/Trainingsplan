@@ -810,11 +810,18 @@ export function generateDemoSessions(locationId) {
     const progress = (totalDays - daysAgo) / totalDays; // 0..1 über den Zeitraum
     const entries = day.exercises.map(item => {
       const ex = getExercise(item.exerciseId);
+      const isBodyweight = ex?.equipment === 'Körpergewicht';
       const baseWeight = 20 + Math.random() * 40;
       const sets = [];
       for (let i = 0; i < item.sets; i++) {
+        // Körpergewichtsübungen realistisch ohne Zusatzgewicht abbilden (kein
+        // erfundenes Gewicht) - Fortschritt zeigt sich hier stattdessen über
+        // mehr Wiederholungen im Zeitverlauf.
+        const r = isBodyweight
+          ? Math.max(1, Math.round(item.reps * (1 + progress * 0.25) + (Math.random() * 4 - 2)))
+          : Math.max(1, Math.round(item.reps + (Math.random() * 4 - 2)));
+        if (isBodyweight) { sets.push({ weight: '', reps: r, done: true }); continue; }
         const w = Math.round((baseWeight * (1 + progress * 0.15) + (Math.random() * 4 - 2)) * 2) / 2;
-        const r = Math.max(1, Math.round(item.reps + (Math.random() * 4 - 2)));
         sets.push({ weight: Math.max(2.5, w), reps: r, done: true });
       }
       return {
@@ -890,7 +897,12 @@ export function importData(json, mode = 'replace') {
   const incoming = typeof json === 'string' ? JSON.parse(json) : json;
   if (!incoming || typeof incoming !== 'object') throw new Error('Ungültige Datei');
   if (mode === 'replace') {
-    store = Object.assign(DEFAULTS(), incoming);
+    const d = DEFAULTS();
+    store = Object.assign(d, incoming);
+    // Settings einzeln zusammenführen (nicht komplett ersetzen) - ein älteres
+    // Backup ohne neuere Einstellungs-Felder soll dafür sinnvolle Defaults
+    // bekommen statt überall undefined (gleiche Logik wie in db()).
+    store.settings = Object.assign(d.settings, incoming.settings || {});
   } else { // merge
     const d = db();
     ['exercises', 'locations', 'plans', 'days', 'sessions', 'trashExercises', 'trashSessions'].forEach(k => {

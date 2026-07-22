@@ -51,10 +51,10 @@
   --border: #ffffff; --text: #ffffff; --text-dim: #f0f0f0; --text-dim2: #d0d0d0;
   --accent: #ffe600; --accent-2: #ccb800; --good: #00ff66; --warn: #ff9900; --bad: #ff3333;
 }
-/* Heller Akzent im Kontrast-Theme -> schwarzer statt weißer Text für genug Kontrast */
-:root[data-theme="contrast"] #restBar,
-:root[data-theme="contrast"] #restBar button,
-:root[data-theme="contrast"] .set-check.on { color: #000; }
+/* Lesbarer Text auf der (frei wählbaren) Akzentfarbe: --on-accent wird in
+   applyDisplaySettings() aus der tatsächlichen Akzentfarbe berechnet (schwarz
+   oder weiß, je nach Helligkeit) - theme-unabhängig, da die Akzentfarbe als
+   Inline-Style immer den Theme-Wert überschreibt. */
 
 /* ---------- Schriftgröße (Einstellungen -> Design) ---------- */
 html[data-fontsize="small"] { font-size: 14px; }
@@ -189,7 +189,7 @@ html, body {
   cursor: pointer; text-decoration: none; font-family: inherit;
 }
 .btn:active { transform: translateY(1px); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); }
 .btn.good { background: var(--good); border-color: var(--good); color: #06281a; }
 .btn.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
 .btn.ghost { background: transparent; }
@@ -202,7 +202,7 @@ html, body {
   position: fixed; right: 16px;
   bottom: calc(var(--tabbar-h) + var(--safe-b) + 16px);
   z-index: 45; width: 56px; height: 56px; border-radius: 50%;
-  background: var(--accent); color: #fff; border: none; font-size: 1.9rem;
+  background: var(--accent); color: var(--on-accent, #fff); border: none; font-size: 1.9rem;
   box-shadow: 0 6px 18px rgba(0,0,0,.4); cursor: pointer; display: grid; place-items: center;
 }
 .fab:active { transform: scale(.95); }
@@ -250,7 +250,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
   background: var(--bg); color: var(--text); font-size: .85rem; cursor: pointer; font-family: inherit;
 }
-.theme-pick button.sel { border-color: var(--accent); background: rgba(108, 140, 255, .12); font-weight: 700; }
+.theme-pick button.sel { border-color: var(--accent); background: rgba(var(--accent-rgb, 108, 140, 255), .12); font-weight: 700; }
 
 /* ---------- Training screen ---------- */
 .train-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
@@ -279,7 +279,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 /* ---------- Supersätze/Zirkel (Training) ---------- */
 .superset-wrap {
   border: 2px solid var(--accent-2); border-radius: var(--radius); padding: 8px;
-  margin-bottom: 10px; background: rgba(108, 140, 255, .05);
+  margin-bottom: 10px; background: rgba(var(--accent-rgb, 108, 140, 255), .05);
 }
 .superset-wrap .ex-block { margin-bottom: 8px; }
 .superset-wrap .ex-block:last-child { margin-bottom: 0; }
@@ -300,8 +300,8 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   border: 2px solid var(--border); background: var(--bg); display: grid; place-items: center;
   font-size: .85rem; color: transparent;
 }
-.select-check.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.select-card.sel { border-color: var(--accent); background: rgba(108, 140, 255, .08); }
+.select-check.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); }
+.select-card.sel { border-color: var(--accent); background: rgba(var(--accent-rgb, 108, 140, 255), .08); }
 
 /* ---------- Muskelgruppen-Volumen (Statistik) ---------- */
 .vol-row { display: grid; grid-template-columns: 92px 1fr 56px; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -328,7 +328,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 }
 .sheet-btn.split .split-half:first-child { border-right: 1px solid var(--border); }
 .sheet-btn.split .split-half:last-child { border-left: 1px solid var(--border); }
-.sheet-btn.split .split-half:active { background: rgba(255, 255, 255, .06); }
+.sheet-btn.split .split-half:active { background: rgba(128, 128, 128, .18); }
 .sheet-btn.split .split-label { flex: 1; text-align: center; font-size: .88rem; align-self: center; }
 
 /* ---------- Muskel-/Geräte-Labels ---------- */
@@ -342,14 +342,14 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 #restBar {
   position: fixed; left: 50%; transform: translateX(-50%);
   top: calc(var(--topbar-h) + var(--safe-t) + 8px);
-  z-index: 60; background: var(--accent); color: #fff;
+  z-index: 60; background: var(--accent); color: var(--on-accent, #fff);
   border-radius: 999px; padding: 10px 16px; display: flex; align-items: center; gap: 14px;
   box-shadow: 0 6px 20px rgba(0,0,0,.45); font-weight: 700;
   max-width: calc(100% - 24px);
 }
 #restBar.hidden { display: none; }
 #restBar .rt-time { font-variant-numeric: tabular-nums; font-size: 1.15rem; min-width: 52px; text-align: center; }
-#restBar button { background: rgba(255,255,255,.2); border: none; color: #fff; border-radius: 999px; padding: 6px 12px; font-weight: 700; cursor: pointer; }
+#restBar button { background: var(--on-accent-overlay, rgba(255,255,255,.2)); border: none; color: var(--on-accent, #fff); border-radius: 999px; padding: 6px 12px; font-weight: 700; cursor: pointer; }
 
 /* ---------- Modal ---------- */
 .modal-back { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.55); display: flex; align-items: flex-end; justify-content: center; }
@@ -366,10 +366,6 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   .modal { border-radius: 18px; }
 }
 
-/* ---------- Chips / badges ---------- */
-.badges { display: flex; flex-wrap: wrap; gap: 6px; }
-.badge { font-size: .72rem; padding: 3px 8px; border-radius: 999px; background: var(--bg-elev2); color: var(--text-dim); border: 1px solid var(--border); }
-.badge.accent { color: var(--accent); border-color: var(--accent-2); }
 
 /* ---------- Calendar ---------- */
 .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -385,10 +381,6 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 .cal-cell .cal-day { position: absolute; top: 3px; left: 5px; color: var(--text-dim2); font-size: .62rem; }
 .cal-cell.today { border-color: var(--accent); }
 .cal-cell .cal-emojis { font-size: 1.05rem; line-height: 1.05; display: flex; flex-wrap: wrap; justify-content: center; gap: 1px; margin-top: 6px; }
-.cal-cell .cal-kuerzel { font-size: .62rem; font-weight: 700; margin-top: 2px; padding: 0 3px; border-radius: 4px; }
-.cal-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-.cal-legend .li { display: flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--text-dim); }
-.cal-legend .dot { width: 12px; height: 12px; border-radius: 4px; }
 
 .streak-row { display: flex; gap: 10px; margin-bottom: 12px; }
 .stat-tile { flex: 1; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; text-align: center; }
@@ -415,9 +407,6 @@ table.hist td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .toast { background: var(--bg-elev2); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 9px 16px; font-size: .88rem; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.4); animation: fade .2s; }
 @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; } }
 
-.drag-handle { cursor: grab; color: var(--text-dim2); font-size: 1.2rem; padding: 0 2px; touch-action: none; }
-.dragging { opacity: .5; }
-
 hr.sep { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 a { color: var(--accent); }
 
@@ -434,7 +423,7 @@ a { color: var(--accent); }
   cursor: pointer; white-space: nowrap; font-family: inherit;
 }
 .loc-chip:active { transform: translateY(1px); }
-.loc-chip.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+.loc-chip.sel { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); }
 .loc-chip.add { color: var(--text-dim2); font-size: 1.1rem; padding: 7px 13px; }
 .loc-chip-edit { font-size: .78rem; opacity: .85; }
 .loc-badge {
@@ -457,7 +446,7 @@ a { color: var(--accent); }
 .filter-acc[open] summary::after { transform: rotate(180deg); }
 .filter-acc .filter-row { padding: 0 10px 10px; }
 .acc-badge {
-  background: var(--accent); color: #fff; font-size: .7rem; font-weight: 700;
+  background: var(--accent); color: var(--on-accent, #fff); font-size: .7rem; font-weight: 700;
   border-radius: 999px; padding: 1px 7px; margin-left: 8px; min-width: 16px; text-align: center;
 }
 .filter-row { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -467,7 +456,7 @@ a { color: var(--accent); }
   cursor: pointer; font-family: inherit; white-space: nowrap;
 }
 .filter-chip:active { transform: translateY(1px); }
-.filter-chip.sel { background: var(--accent-2); border-color: var(--accent); color: #fff; }
+.filter-chip.sel { background: var(--accent-2); border-color: var(--accent); color: var(--on-accent, #fff); }
 
 /* ---------- Pläne: aufklappbare Trainingstage ---------- */
 .plan-acc {
