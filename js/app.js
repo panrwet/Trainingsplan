@@ -813,7 +813,8 @@ function pickExerciseModal(onPick, excludeIds = []) {
   const excludeSet = new Set(excludeIds);
   const body = `
     <input id="f-search" placeholder="Übung suchen …" style="margin-bottom:10px" />
-    <button class="btn primary block" id="newEx" style="margin-bottom:12px">+ Neue Übung anlegen</button>
+    ${exerciseFilterHTML()}
+    <button class="btn primary block" id="newEx" style="margin:12px 0">+ Neue Übung anlegen</button>
     <div id="exList"></div>`;
   openModal({
     title: 'Übung wählen',
@@ -821,7 +822,7 @@ function pickExerciseModal(onPick, excludeIds = []) {
     onMount: (m, close) => {
       const listEl = $('#exList', m);
       const draw = (q = '') => {
-        const items = list.filter(e => e.name.toLowerCase().includes(q.toLowerCase()));
+        const items = applyExerciseFilter(list).filter(e => !q || e.name.toLowerCase().includes(q.toLowerCase()));
         listEl.innerHTML = items.length ? items.map(e => {
           const dup = excludeSet.has(e.id);
           return `<div class="list-row ${dup ? 'disabled' : ''}" ${dup ? '' : `data-pick="${e.id}"`}>
@@ -829,10 +830,11 @@ function pickExerciseModal(onPick, excludeIds = []) {
               ${tagBadgesHTML(e)}
               ${dup ? '<div class="tiny muted">Bereits in diesem Trainingstag</div>' : ''}</div>
             <span class="arrow">${dup ? '' : '＋'}</span></div>`;
-        }).join('') : `<div class="tiny muted center" style="padding:12px">Keine Übung gefunden.</div>`;
+        }).join('') : `<div class="tiny muted center" style="padding:12px">Keine Übung passt zum Filter.</div>`;
         $$('[data-pick]', listEl).forEach(n => n.onclick = () => { close(); onPick(n.dataset.pick); });
       };
       draw();
+      wireExerciseFilter(m, () => draw($('#f-search', m).value));
       $('#f-search', m).oninput = e => draw(e.target.value);
       $('#newEx', m).onclick = () => { close(); editExerciseModal(null, newId => onPick(newId)); };
     },
@@ -852,7 +854,77 @@ function tagBadgesHTML(ex) {
   return parts.length ? `<div class="tag-badges">${parts.join('')}</div>` : '';
 }
 
-let libFilter = { muscles: new Set(), equipment: new Set() };
+// Muskel-/Geräte-Filter: geteilter Zustand, damit dieselbe Filterung sowohl in der
+// Bibliothek als auch überall dort verfügbar ist, wo eine Übung ausgewählt wird
+// (Trainingstag bearbeiten, Übung während des Trainings hinzufügen - siehe
+// pickExerciseModal). matchMode steuert nur die Muskelgruppen-Auswahl (UND = alle
+// gewählten Muskeln müssen zutreffen, ODER = mindestens eine) - bei Geräten ist nur
+// ODER sinnvoll, da eine Übung immer genau ein Gerät hat.
+let exFilter = { muscles: new Set(), equipment: new Set(), matchMode: 'or' };
+
+// Gemeinsame Filter-UI (Muskelgruppe/Gerät-Chips + UND/ODER-Umschalter), wird sowohl
+// in /library als auch in pickExerciseModal eingebettet.
+function exerciseFilterHTML() {
+  const muscleList = DB.muscleGroups();
+  const equipList = DB.equipmentTypes();
+  return `
+    <details class="filter-acc"${exFilter.muscles.size ? ' open' : ''}>
+      <summary>Muskelgruppe${exFilter.muscles.size ? `<span class="acc-badge">${exFilter.muscles.size}</span>` : ''}</summary>
+      <div class="filter-row" id="filterMuscles">${muscleList.map(m => `<button type="button" class="filter-chip ${exFilter.muscles.has(m.name) ? 'sel' : ''}" data-fm="${esc(m.name)}">${esc(m.name)}</button>`).join('')}
+        <button type="button" class="filter-chip add" id="manageMgChip">⚙️ Verwalten</button></div>
+      <div class="filter-row" style="margin-top:6px">
+        <span class="tiny muted" style="align-self:center">Bei mehreren Muskeln:</span>
+        <button type="button" class="filter-chip ${exFilter.matchMode === 'and' ? 'sel' : ''}" id="matchModeChip">${exFilter.matchMode === 'and' ? 'UND (alle)' : 'ODER (mind. eine)'}</button>
+      </div>
+    </details>
+    <details class="filter-acc"${exFilter.equipment.size ? ' open' : ''}>
+      <summary>Gerät${exFilter.equipment.size ? `<span class="acc-badge">${exFilter.equipment.size}</span>` : ''}</summary>
+      <div class="filter-row" id="filterEquip">${equipList.map(eq => `<button type="button" class="filter-chip ${exFilter.equipment.has(eq.name) ? 'sel' : ''}" data-fe="${esc(eq.name)}">${esc(eq.name)}</button>`).join('')}
+        <button type="button" class="filter-chip add" id="manageEqChip">⚙️ Verwalten</button></div>
+    </details>`;
+}
+
+// Wire-Handler für exerciseFilterHTML() - redraw ist nur die Liste, nicht die
+// Filter-Chips selbst (die togglen ihren Zustand direkt per classList, ohne
+// Neu-Rendern - vermeidet Flackern/Fokusverlust in der Suche).
+function wireExerciseFilter(root, redraw) {
+  const mgChip = $('#manageMgChip', root); if (mgChip) mgChip.onclick = () => manageMuscleGroupsModal();
+  const eqChip = $('#manageEqChip', root); if (eqChip) eqChip.onclick = () => manageEquipmentModal();
+  $$('[data-fm]', root).forEach(b => b.onclick = () => {
+    const m = b.dataset.fm;
+    exFilter.muscles.has(m) ? exFilter.muscles.delete(m) : exFilter.muscles.add(m);
+    b.classList.toggle('sel');
+    redraw();
+  });
+  $$('[data-fe]', root).forEach(b => b.onclick = () => {
+    const eq = b.dataset.fe;
+    exFilter.equipment.has(eq) ? exFilter.equipment.delete(eq) : exFilter.equipment.add(eq);
+    b.classList.toggle('sel');
+    redraw();
+  });
+  const modeChip = $('#matchModeChip', root);
+  if (modeChip) modeChip.onclick = () => {
+    exFilter.matchMode = exFilter.matchMode === 'and' ? 'or' : 'and';
+    modeChip.textContent = exFilter.matchMode === 'and' ? 'UND (alle)' : 'ODER (mind. eine)';
+    modeChip.classList.toggle('sel', exFilter.matchMode === 'and');
+    redraw();
+  };
+}
+
+// Wendet den aktuellen Muskel-/Geräte-Filter auf eine Übungsliste an (Suchtext wird
+// separat je Aufrufer gefiltert, da der Suchbegriff nicht geteilt werden soll).
+function applyExerciseFilter(list) {
+  return list.filter(e => {
+    if (exFilter.muscles.size) {
+      const sel = [...exFilter.muscles];
+      const has = m => (e.muscles || []).includes(m);
+      const ok = exFilter.matchMode === 'and' ? sel.every(has) : sel.some(has);
+      if (!ok) return false;
+    }
+    if (exFilter.equipment.size && !exFilter.equipment.has(e.equipment)) return false;
+    return true;
+  });
+}
 
 route('/library', () => {
   setChrome({ title: 'Übungsbibliothek', back: false });
@@ -864,47 +936,17 @@ route('/library', () => {
     return;
   }
 
-  const muscleList = DB.muscleGroups();
-  const equipList = DB.equipmentTypes();
   let html = `<input id="libSearch" placeholder="Suchen …" style="margin-bottom:10px" />
-    <details class="filter-acc"${libFilter.muscles.size ? ' open' : ''}>
-      <summary>Muskelgruppe${libFilter.muscles.size ? `<span class="acc-badge">${libFilter.muscles.size}</span>` : ''}</summary>
-      <div class="filter-row" id="filterMuscles">${muscleList.map(m => `<button class="filter-chip ${libFilter.muscles.has(m.name) ? 'sel' : ''}" data-fm="${esc(m.name)}">${esc(m.name)}</button>`).join('')}
-        <button class="filter-chip add" id="manageMgChip">⚙️ Verwalten</button></div>
-    </details>
-    <details class="filter-acc"${libFilter.equipment.size ? ' open' : ''}>
-      <summary>Gerät${libFilter.equipment.size ? `<span class="acc-badge">${libFilter.equipment.size}</span>` : ''}</summary>
-      <div class="filter-row" id="filterEquip">${equipList.map(eq => `<button class="filter-chip ${libFilter.equipment.has(eq.name) ? 'sel' : ''}" data-fe="${esc(eq.name)}">${esc(eq.name)}</button>`).join('')}
-        <button class="filter-chip add" id="manageEqChip">⚙️ Verwalten</button></div>
-    </details>
+    ${exerciseFilterHTML()}
     <div id="libCount" class="tiny muted" style="margin:10px 0 8px">${list.length} von ${list.length} Übungen</div>
     <div id="libList"></div>`;
   appEl.innerHTML = html;
-  $('#manageEqChip', appEl).onclick = () => manageEquipmentModal();
-  $('#manageMgChip', appEl).onclick = () => manageMuscleGroupsModal();
-
-  $$('[data-fm]', appEl).forEach(b => b.onclick = () => {
-    const m = b.dataset.fm;
-    libFilter.muscles.has(m) ? libFilter.muscles.delete(m) : libFilter.muscles.add(m);
-    b.classList.toggle('sel');
-    draw($('#libSearch', appEl).value);
-  });
-  $$('[data-fe]', appEl).forEach(b => b.onclick = () => {
-    const eq = b.dataset.fe;
-    libFilter.equipment.has(eq) ? libFilter.equipment.delete(eq) : libFilter.equipment.add(eq);
-    b.classList.toggle('sel');
-    draw($('#libSearch', appEl).value);
-  });
+  wireExerciseFilter(appEl, () => draw($('#libSearch', appEl).value));
 
   function draw(q = '') {
     const listEl = $('#libList', appEl);
     if (!listEl) return;
-    const items = list.filter(e => {
-      if (q && !e.name.toLowerCase().includes(q.toLowerCase())) return false;
-      if (libFilter.muscles.size && !(e.muscles || []).some(m => libFilter.muscles.has(m))) return false;
-      if (libFilter.equipment.size && !libFilter.equipment.has(e.equipment)) return false;
-      return true;
-    });
+    const items = applyExerciseFilter(list).filter(e => !q || e.name.toLowerCase().includes(q.toLowerCase()));
     $('#libCount', appEl).textContent = `${items.length} von ${list.length} Übungen`;
     listEl.innerHTML = items.length ? items.map(e => {
       const uses = DB.exerciseUsage(e.id);
@@ -973,7 +1015,7 @@ function editExerciseModal(id, onSaved) {
       }
       redrawEquip();
       $('[data-x]', m).onclick = close;
-      $('[data-ok]', m).onclick = () => {
+      $('[data-ok]', m).onclick = async () => {
         const name = $('#f-name', m).value.trim();
         if (!name) return toast('Bitte einen Namen eingeben');
         const data = {
@@ -983,6 +1025,11 @@ function editExerciseModal(id, onSaved) {
           unit: $('#f-unit', m).value,
           notes: $('#f-notes', m).value.trim(),
         };
+        const dup = DB.findDuplicateExercise(data, id);
+        if (dup) {
+          const ok = await confirmDialog(`Es gibt bereits eine Übung „${dup.name}" mit denselben Muskelgruppen und demselben Gerät. Trotzdem als weitere Übung anlegen?`, { okText: 'Trotzdem anlegen' });
+          if (!ok) return;
+        }
         let savedId = id;
         if (id) DB.updateExercise(id, data); else savedId = DB.addExercise(data).id;
         if (activeLoc) DB.setExerciseNote(savedId, activeLoc.id, $('#f-locnote', m).value);
@@ -1064,7 +1111,7 @@ function manageEquipmentModal() {
   // geschlossen werden, was den "Fertig"-Button-Handler umgeht).
   function cleanupAndRefresh() {
     const validNames = new Set(DB.equipmentTypes().map(e => e.name));
-    [...libFilter.equipment].forEach(n => { if (!validNames.has(n)) libFilter.equipment.delete(n); });
+    [...exFilter.equipment].forEach(n => { if (!validNames.has(n)) exFilter.equipment.delete(n); });
     render();
   }
   openModal({
@@ -1154,7 +1201,7 @@ function manageMuscleGroupsModal() {
   // beim Schließen (Backdrop-Klick würde den "Fertig"-Button-Handler sonst umgehen).
   function cleanupAndRefresh() {
     const validNames = new Set(DB.muscleGroups().map(mg => mg.name));
-    [...libFilter.muscles].forEach(n => { if (!validNames.has(n)) libFilter.muscles.delete(n); });
+    [...exFilter.muscles].forEach(n => { if (!validNames.has(n)) exFilter.muscles.delete(n); });
     render();
   }
   openModal({
@@ -1186,7 +1233,7 @@ function manageMuscleGroupsModal() {
 let restTimer = null;
 
 // Zirkel-/Reihenfolge-Modus im laufenden Training (analog zu /day/:id) - modulglobal
-// wie calState/libFilter, da renderTrain/renderEntries als eigenständige Funktionen
+// wie calState/exFilter, da renderTrain/renderEntries als eigenständige Funktionen
 // (nicht als Route-Closure) von mehreren Stellen aus erneut aufgerufen werden.
 let trainMode = null; // null | 'select' | 'reorder'
 const trainSelected = new Set(); // Entry-Indizes während der Zirkel-Auswahl
@@ -2271,6 +2318,11 @@ route('/settings', () => {
       <input type="file" id="impFile" accept="application/json,.json" hidden />
 
       <hr class="sep" />
+      <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Übungsbibliothek</div>
+      <p class="tiny muted" style="margin-top:0">Ergänzt neue Standard-Übungen aus der kuratierten Bibliothek, die noch fehlen. Eigene Übungen/Namen werden dabei nicht verändert oder gelöscht.</p>
+      <button class="btn ghost block" id="addLibBtn">Fehlende Standard-Übungen ergänzen</button>
+
+      <hr class="sep" />
       <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Beispieldaten</div>
       <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
         <input id="s-demo" type="checkbox" ${activeLoc && DB.hasDemoSessions(activeLoc.id) ? 'checked' : ''} style="width:auto" />
@@ -2360,6 +2412,12 @@ route('/settings', () => {
 
   $('#openTrashBtn', appEl).onclick = () => openTrashModal();
 
+  $('#addLibBtn', appEl).onclick = () => {
+    const added = addMissingLibraryExercises();
+    toast(added ? `${added} neue Übung(en) ergänzt` : 'Du hast bereits alle Standard-Übungen');
+    if (added) render();
+  };
+
   $('#s-demo', appEl).onchange = e => {
     if (e.target.checked) {
       if (!activeLoc) { toast('Erst einen Ort anlegen'); e.target.checked = false; return; }
@@ -2390,114 +2448,163 @@ route('/settings', () => {
 // Namen enthalten das Gerät NICHT mehr in Klammern (steht jetzt als eigenes,
 // farbiges Label unter der Übung) - Klammer-Zusätze bleiben nur für echte
 // Bewegungs-/Griff-Varianten (z.B. "(breiter Griff)", "(Brust-Fokus)") erhalten.
+// Kuratierte Übungsbibliothek (Recherche gängiger Kraftsport-Grund- und
+// Isolationsübungen, siehe README). Jeder Eintrag hat einen internen "key"
+// (nur zum Verdrahten der Beispielpläne unten, wird NICHT mit angelegt) - nötig,
+// weil derselbe Übungsname bewusst mehrfach vorkommen darf (z.B. "Bankdrücken"
+// mit Langhantel/Kurzhantel/Maschine): das Gerät steht schon als Badge dabei,
+// daher wird es NICHT zusätzlich redundant in den Namen geschrieben (z.B.
+// "Bankdrücken" statt "Kurzhantel-Bankdrücken" bei Gerät "Kurzhantel"). Namens-
+// Zusätze bleiben nur, wenn sie wirklich eine andere Bewegung/Variante
+// beschreiben (Griff, Winkel, einarmig, Multipresse/Smith-Machine als
+// spezifischerer Maschinentyp) statt nur das Gerät zu wiederholen.
 const LIBRARY_EXERCISES = [
   // Brust
-  { name: 'Bankdrücken', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Langhantel' },
-  { name: 'Bankdrücken Multipresse', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Maschine' },
-  { name: 'Kurzhantel-Bankdrücken', muscles: ['Brust', 'Trizeps'], equipment: 'Kurzhantel' },
-  { name: 'Schrägbankdrücken', muscles: ['Brust', 'Schultern', 'Trizeps'], equipment: 'Langhantel' },
-  { name: 'Kurzhantel-Schrägbankdrücken', muscles: ['Brust', 'Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
-  { name: 'Negativ-Bankdrücken', muscles: ['Brust', 'Trizeps'], equipment: 'Langhantel' },
-  { name: 'Butterfly', muscles: ['Brust'], equipment: 'Maschine' },
-  { name: 'Kabelzug über Kreuz', muscles: ['Brust'], equipment: 'Kabelzug' },
-  { name: 'Dips (Brust-Fokus)', muscles: ['Brust', 'Trizeps'], equipment: 'Körpergewicht' },
-  { name: 'Liegestütze', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Körpergewicht' },
-  { name: 'Diamond-Liegestütze', muscles: ['Trizeps', 'Brust'], equipment: 'Körpergewicht' },
+  { key: 'bankdruecken-lh', name: 'Bankdrücken', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Langhantel' },
+  { key: 'bankdruecken-kh', name: 'Bankdrücken', muscles: ['Brust', 'Trizeps'], equipment: 'Kurzhantel' },
+  { key: 'bankdruecken-mp', name: 'Bankdrücken Multipresse', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Maschine' },
+  { key: 'schraegbankdruecken-lh', name: 'Schrägbankdrücken', muscles: ['Brust', 'Schultern', 'Trizeps'], equipment: 'Langhantel' },
+  { key: 'schraegbankdruecken-kh', name: 'Schrägbankdrücken', muscles: ['Brust', 'Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
+  { key: 'schraegbankdruecken-mp', name: 'Schrägbankdrücken Multipresse', muscles: ['Brust', 'Schultern', 'Trizeps'], equipment: 'Maschine' },
+  { key: 'negativ-bankdruecken', name: 'Negativ-Bankdrücken', muscles: ['Brust', 'Trizeps'], equipment: 'Langhantel' },
+  { key: 'fliegende', name: 'Fliegende', muscles: ['Brust'], equipment: 'Kurzhantel' },
+  { key: 'butterfly', name: 'Butterfly', muscles: ['Brust'], equipment: 'Maschine' },
+  { key: 'kreuzzuege', name: 'Kreuzzüge', muscles: ['Brust'], equipment: 'Kabelzug' },
+  { key: 'dips-brust', name: 'Dips (Brust-Fokus)', muscles: ['Brust', 'Trizeps'], equipment: 'Körpergewicht' },
+  { key: 'liegestuetze', name: 'Liegestütze', muscles: ['Brust', 'Trizeps', 'Schultern'], equipment: 'Körpergewicht' },
+  { key: 'diamond-liegestuetze', name: 'Diamond-Liegestütze', muscles: ['Trizeps', 'Brust'], equipment: 'Körpergewicht' },
+  { key: 'ueberzuege', name: 'Überzüge (Pullover)', muscles: ['Brust', 'Rücken'], equipment: 'Kurzhantel' },
   // Rücken
-  { name: 'Kreuzheben', muscles: ['Rücken', 'Gesäß', 'Beinbeuger', 'Ganzkörper'], equipment: 'Langhantel' },
-  { name: 'Sumo-Kreuzheben', muscles: ['Gesäß', 'Beinbeuger', 'Rücken'], equipment: 'Langhantel' },
-  { name: 'Rumänisches Kreuzheben', muscles: ['Beinbeuger', 'Gesäß', 'Rücken'], equipment: 'Langhantel' },
-  { name: 'Klimmzüge', muscles: ['Rücken', 'Bizeps'], equipment: 'Körpergewicht' },
-  { name: 'Enge Klimmzüge', muscles: ['Rücken', 'Bizeps'], equipment: 'Körpergewicht' },
-  { name: 'Latzug (breiter Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
-  { name: 'Latzug (enger Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
-  { name: 'Latzug (neutraler Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
-  { name: 'Rudern vorgebeugt', muscles: ['Rücken', 'Bizeps'], equipment: 'Langhantel' },
-  { name: 'Einarmiges Rudern', muscles: ['Rücken', 'Bizeps'], equipment: 'Kurzhantel' },
-  { name: 'T-Bar Rudern', muscles: ['Rücken'], equipment: 'Maschine' },
-  { name: 'Kabelrudern sitzend (weiter Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
-  { name: 'Kabelrudern sitzend (enger Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
-  { name: 'Rückenstrecker', muscles: ['Rücken', 'Gesäß'], equipment: 'Körpergewicht' },
-  { name: 'Facepulls', muscles: ['Schultern', 'Rücken'], equipment: 'Kabelzug' },
-  { name: 'Reverse Butterfly', muscles: ['Schultern', 'Rücken'], equipment: 'Maschine' },
+  { key: 'kreuzheben', name: 'Kreuzheben', muscles: ['Rücken', 'Gesäß', 'Beinbeuger', 'Ganzkörper'], equipment: 'Langhantel' },
+  { key: 'sumo-kreuzheben', name: 'Sumo-Kreuzheben', muscles: ['Gesäß', 'Beinbeuger', 'Rücken'], equipment: 'Langhantel' },
+  { key: 'rumaenisches-kreuzheben', name: 'Rumänisches Kreuzheben', muscles: ['Beinbeuger', 'Gesäß', 'Rücken'], equipment: 'Langhantel' },
+  { key: 'good-mornings', name: 'Good Mornings', muscles: ['Rücken', 'Gesäß', 'Beinbeuger'], equipment: 'Langhantel' },
+  { key: 'klimmzuege', name: 'Klimmzüge', muscles: ['Rücken', 'Bizeps'], equipment: 'Körpergewicht' },
+  { key: 'enge-klimmzuege', name: 'Enge Klimmzüge', muscles: ['Rücken', 'Bizeps'], equipment: 'Körpergewicht' },
+  { key: 'klimmzuege-untergriff', name: 'Klimmzüge (Untergriff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Körpergewicht' },
+  { key: 'klimmzugmaschine', name: 'Klimmzüge (unterstützt)', muscles: ['Rücken', 'Bizeps'], equipment: 'Maschine' },
+  { key: 'latzug-breit', name: 'Latzug (breiter Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { key: 'latzug-eng', name: 'Latzug (enger Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { key: 'latzug-neutral', name: 'Latzug (neutraler Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { key: 'latzug-untergriff', name: 'Latzug (Untergriff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { key: 'rudern-vorgebeugt', name: 'Rudern vorgebeugt', muscles: ['Rücken', 'Bizeps'], equipment: 'Langhantel' },
+  { key: 'rudern-einarmig', name: 'Einarmiges Rudern', muscles: ['Rücken', 'Bizeps'], equipment: 'Kurzhantel' },
+  { key: 't-bar-rudern', name: 'T-Bar Rudern', muscles: ['Rücken'], equipment: 'Maschine' },
+  { key: 'rudern-sitzend-weit', name: 'Rudern sitzend (weiter Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { key: 'rudern-sitzend-eng', name: 'Rudern sitzend (enger Griff)', muscles: ['Rücken', 'Bizeps'], equipment: 'Kabelzug' },
+  { key: 'rudern-brust-gestuetzt', name: 'Rudern (Brust gestützt)', muscles: ['Rücken', 'Bizeps'], equipment: 'Maschine' },
+  { key: 'rueckenstrecker', name: 'Rückenstrecker', muscles: ['Rücken', 'Gesäß'], equipment: 'Körpergewicht' },
+  { key: 'reverse-hyperextension', name: 'Reverse Hyperextension', muscles: ['Gesäß', 'Rücken'], equipment: 'Maschine' },
+  { key: 'facepulls', name: 'Facepulls', muscles: ['Schultern', 'Rücken'], equipment: 'Kabelzug' },
+  { key: 'reverse-butterfly', name: 'Reverse Butterfly', muscles: ['Schultern', 'Rücken'], equipment: 'Maschine' },
+  { key: 'shrugs-lh', name: 'Nackenheben (Shrugs)', muscles: ['Rücken', 'Schultern'], equipment: 'Langhantel' },
+  { key: 'shrugs-kh', name: 'Nackenheben (Shrugs)', muscles: ['Rücken', 'Schultern'], equipment: 'Kurzhantel' },
+  { key: 'latissimuszug-gestreckt', name: 'Latissimuszug gestreckt', muscles: ['Rücken'], equipment: 'Kabelzug' },
   // Schultern
-  { name: 'Schulterdrücken', muscles: ['Schultern', 'Trizeps'], equipment: 'Langhantel' },
-  { name: 'Kurzhantel-Schulterdrücken', muscles: ['Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
-  { name: 'Schulterdrücken Maschine', muscles: ['Schultern', 'Trizeps'], equipment: 'Maschine' },
-  { name: 'Arnold Press', muscles: ['Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
-  { name: 'Seitheben', muscles: ['Schultern'], equipment: 'Kurzhantel' },
-  { name: 'Seitheben am Kabel', muscles: ['Schultern'], equipment: 'Kabelzug' },
-  { name: 'Frontheben', muscles: ['Schultern'], equipment: 'Kurzhantel' },
-  { name: 'Aufrechtes Rudern', muscles: ['Schultern', 'Rücken'], equipment: 'Langhantel' },
-  // Arme
-  { name: 'Bizepscurls', muscles: ['Bizeps'], equipment: 'Langhantel' },
-  { name: 'Kurzhantel-Bizepscurls', muscles: ['Bizeps'], equipment: 'Kurzhantel' },
-  { name: 'Kabel-Bizepscurls', muscles: ['Bizeps'], equipment: 'Kabelzug' },
-  { name: 'Hammercurls', muscles: ['Bizeps', 'Unterarme'], equipment: 'Kurzhantel' },
-  { name: 'Konzentrationscurls', muscles: ['Bizeps'], equipment: 'Kurzhantel' },
-  { name: 'Scott-Curls', muscles: ['Bizeps'], equipment: 'Langhantel' },
-  { name: 'Trizepsdrücken am Kabel', muscles: ['Trizeps'], equipment: 'Kabelzug' },
-  { name: 'Trizeps-Überkopfstrecken', muscles: ['Trizeps'], equipment: 'Kurzhantel' },
-  { name: 'French Press', muscles: ['Trizeps'], equipment: 'Langhantel' },
-  { name: 'Enges Bankdrücken', muscles: ['Trizeps', 'Brust'], equipment: 'Langhantel' },
-  { name: 'Dips (Trizeps-Fokus)', muscles: ['Trizeps'], equipment: 'Körpergewicht' },
-  { name: 'Unterarmcurls', muscles: ['Unterarme'], equipment: 'Kurzhantel' },
-  { name: 'Reverse Curls', muscles: ['Unterarme', 'Bizeps'], equipment: 'Langhantel' },
+  { key: 'schulterdruecken-lh', name: 'Schulterdrücken', muscles: ['Schultern', 'Trizeps'], equipment: 'Langhantel' },
+  { key: 'schulterdruecken-kh', name: 'Schulterdrücken', muscles: ['Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
+  { key: 'schulterdruecken-mp', name: 'Schulterdrücken', muscles: ['Schultern', 'Trizeps'], equipment: 'Maschine' },
+  { key: 'arnold-press', name: 'Arnold Press', muscles: ['Schultern', 'Trizeps'], equipment: 'Kurzhantel' },
+  { key: 'seitheben-kh', name: 'Seitheben', muscles: ['Schultern'], equipment: 'Kurzhantel' },
+  { key: 'seitheben-kabel', name: 'Seitheben', muscles: ['Schultern'], equipment: 'Kabelzug' },
+  { key: 'seitheben-maschine', name: 'Seitheben', muscles: ['Schultern'], equipment: 'Maschine' },
+  { key: 'frontheben-kh', name: 'Frontheben', muscles: ['Schultern'], equipment: 'Kurzhantel' },
+  { key: 'frontheben-kabel', name: 'Frontheben', muscles: ['Schultern'], equipment: 'Kabelzug' },
+  { key: 'aufrechtes-rudern-lh', name: 'Aufrechtes Rudern', muscles: ['Schultern', 'Rücken'], equipment: 'Langhantel' },
+  { key: 'aufrechtes-rudern-kabel', name: 'Aufrechtes Rudern', muscles: ['Schultern', 'Rücken'], equipment: 'Kabelzug' },
+  { key: 'y-raise', name: 'Y-Raise', muscles: ['Schultern', 'Rücken'], equipment: 'Kurzhantel' },
+  // Arme (Bizeps)
+  { key: 'bizepscurls-lh', name: 'Bizepscurls', muscles: ['Bizeps'], equipment: 'Langhantel' },
+  { key: 'bizepscurls-kh', name: 'Bizepscurls', muscles: ['Bizeps'], equipment: 'Kurzhantel' },
+  { key: 'bizepscurls-kabel', name: 'Bizepscurls', muscles: ['Bizeps'], equipment: 'Kabelzug' },
+  { key: 'bizepscurls-maschine', name: 'Bizepscurls', muscles: ['Bizeps'], equipment: 'Maschine' },
+  { key: 'hammercurls-kh', name: 'Hammercurls', muscles: ['Bizeps', 'Unterarme'], equipment: 'Kurzhantel' },
+  { key: 'hammercurls-kabel', name: 'Hammercurls', muscles: ['Bizeps', 'Unterarme'], equipment: 'Kabelzug' },
+  { key: 'konzentrationscurls', name: 'Konzentrationscurls', muscles: ['Bizeps'], equipment: 'Kurzhantel' },
+  { key: 'scott-curls-lh', name: 'Scott-Curls', muscles: ['Bizeps'], equipment: 'Langhantel' },
+  { key: 'scott-curls-kh', name: 'Scott-Curls', muscles: ['Bizeps'], equipment: 'Kurzhantel' },
+  // Arme (Trizeps)
+  { key: 'trizepsdruecken-kabel', name: 'Trizepsdrücken', muscles: ['Trizeps'], equipment: 'Kabelzug' },
+  { key: 'trizepsdruecken-maschine', name: 'Trizepsdrücken', muscles: ['Trizeps'], equipment: 'Maschine' },
+  { key: 'trizeps-ueberkopf-kh', name: 'Trizeps-Überkopfstrecken', muscles: ['Trizeps'], equipment: 'Kurzhantel' },
+  { key: 'trizeps-ueberkopf-kabel', name: 'Trizeps-Überkopfstrecken', muscles: ['Trizeps'], equipment: 'Kabelzug' },
+  { key: 'french-press-lh', name: 'French Press', muscles: ['Trizeps'], equipment: 'Langhantel' },
+  { key: 'french-press-kh', name: 'French Press', muscles: ['Trizeps'], equipment: 'Kurzhantel' },
+  { key: 'enges-bankdruecken', name: 'Enges Bankdrücken', muscles: ['Trizeps', 'Brust'], equipment: 'Langhantel' },
+  { key: 'dips-trizeps', name: 'Dips (Trizeps-Fokus)', muscles: ['Trizeps'], equipment: 'Körpergewicht' },
+  { key: 'trizeps-kickbacks', name: 'Trizeps-Kickbacks', muscles: ['Trizeps'], equipment: 'Kurzhantel' },
+  // Arme (Unterarme)
+  { key: 'unterarmcurls', name: 'Unterarmcurls', muscles: ['Unterarme'], equipment: 'Kurzhantel' },
+  { key: 'unterarmcurls-rueckwaerts', name: 'Unterarmcurls rückwärts', muscles: ['Unterarme'], equipment: 'Kurzhantel' },
+  { key: 'reverse-curls-lh', name: 'Reverse Curls', muscles: ['Unterarme', 'Bizeps'], equipment: 'Langhantel' },
+  { key: 'reverse-curls-kh', name: 'Reverse Curls', muscles: ['Unterarme', 'Bizeps'], equipment: 'Kurzhantel' },
   // Beine
-  { name: 'Kniebeuge', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Langhantel' },
-  { name: 'Frontkniebeuge', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Langhantel' },
-  { name: 'Kniebeuge Multipresse', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Maschine' },
-  { name: 'Beinpresse', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Maschine' },
-  { name: 'Ausfallschritte', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
-  { name: 'Bulgarian Split Squat', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
-  { name: 'Beinstrecker', muscles: ['Quadrizeps'], equipment: 'Maschine' },
-  { name: 'Beinbeuger liegend', muscles: ['Beinbeuger'], equipment: 'Maschine' },
-  { name: 'Beinbeuger sitzend', muscles: ['Beinbeuger'], equipment: 'Maschine' },
-  { name: 'Hüftstoßen (Hip Thrust)', muscles: ['Gesäß'], equipment: 'Langhantel' },
-  { name: 'Abduktion (Hüfte)', muscles: ['Gesäß'], equipment: 'Maschine' },
-  { name: 'Adduktion (Hüfte)', muscles: ['Gesäß'], equipment: 'Maschine' },
-  { name: 'Wadenheben stehend', muscles: ['Waden'], equipment: 'Maschine' },
-  { name: 'Wadenheben sitzend', muscles: ['Waden'], equipment: 'Maschine' },
-  { name: 'Goblet Squat', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
+  { key: 'kniebeuge', name: 'Kniebeuge', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Langhantel' },
+  { key: 'frontkniebeuge', name: 'Frontkniebeuge', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Langhantel' },
+  { key: 'kniebeuge-mp', name: 'Kniebeuge Multipresse', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Maschine' },
+  { key: 'beinpresse', name: 'Beinpresse', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Maschine' },
+  { key: 'ausfallschritte-kh', name: 'Ausfallschritte', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
+  { key: 'ausfallschritte-kg', name: 'Ausfallschritte', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Körpergewicht' },
+  { key: 'bulgarian-split-squat', name: 'Bulgarian Split Squat', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
+  { key: 'beinstrecker', name: 'Beinstrecker', muscles: ['Quadrizeps'], equipment: 'Maschine' },
+  { key: 'beinbeuger-liegend', name: 'Beinbeuger liegend', muscles: ['Beinbeuger'], equipment: 'Maschine' },
+  { key: 'beinbeuger-sitzend', name: 'Beinbeuger sitzend', muscles: ['Beinbeuger'], equipment: 'Maschine' },
+  { key: 'nordic-beinbeuger', name: 'Nordic Beinbeuger', muscles: ['Beinbeuger'], equipment: 'Körpergewicht' },
+  { key: 'hip-thrust-lh', name: 'Hüftstoßen (Hip Thrust)', muscles: ['Gesäß'], equipment: 'Langhantel' },
+  { key: 'hip-thrust-mp', name: 'Hüftstoßen (Hip Thrust)', muscles: ['Gesäß'], equipment: 'Maschine' },
+  { key: 'abduktion', name: 'Abduktion (Hüfte)', muscles: ['Gesäß'], equipment: 'Maschine' },
+  { key: 'adduktion', name: 'Adduktion (Hüfte)', muscles: ['Gesäß'], equipment: 'Maschine' },
+  { key: 'wadenheben-stehend', name: 'Wadenheben stehend', muscles: ['Waden'], equipment: 'Maschine' },
+  { key: 'wadenheben-sitzend', name: 'Wadenheben sitzend', muscles: ['Waden'], equipment: 'Maschine' },
+  { key: 'wadenheben-kh', name: 'Wadenheben', muscles: ['Waden'], equipment: 'Kurzhantel' },
+  { key: 'goblet-squat', name: 'Goblet Squat', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
+  { key: 'step-ups', name: 'Step-ups', muscles: ['Quadrizeps', 'Gesäß'], equipment: 'Kurzhantel' },
   // Bauch
-  { name: 'Crunches', muscles: ['Bauch'], equipment: 'Körpergewicht' },
-  { name: 'Plank', muscles: ['Bauch'], equipment: 'Körpergewicht' },
-  { name: 'Beinheben hängend', muscles: ['Bauch'], equipment: 'Körpergewicht' },
-  { name: 'Kabel-Crunches', muscles: ['Bauch'], equipment: 'Kabelzug' },
-  { name: 'Russian Twist', muscles: ['Bauch'], equipment: 'Körpergewicht' },
-  { name: 'Sit-ups', muscles: ['Bauch'], equipment: 'Körpergewicht' },
-  { name: 'Ab Wheel Rollout', muscles: ['Bauch', 'Ganzkörper'], equipment: 'Sonstiges' },
+  { key: 'crunches-kg', name: 'Crunches', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { key: 'crunches-kabel', name: 'Crunches', muscles: ['Bauch'], equipment: 'Kabelzug' },
+  { key: 'plank', name: 'Plank', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { key: 'seitplank', name: 'Seitplank', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { key: 'beinheben-haengend', name: 'Beinheben hängend', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { key: 'russian-twist', name: 'Russian Twist', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { key: 'situps', name: 'Sit-ups', muscles: ['Bauch'], equipment: 'Körpergewicht' },
+  { key: 'ab-wheel', name: 'Ab Wheel Rollout', muscles: ['Bauch', 'Ganzkörper'], equipment: 'Sonstiges' },
+  { key: 'holzhacker', name: 'Holzhacker', muscles: ['Bauch'], equipment: 'Kabelzug' },
   // Ganzkörper
-  { name: 'Kettlebell Swing', muscles: ['Gesäß', 'Beinbeuger', 'Ganzkörper'], equipment: 'Kettlebell' },
-  { name: 'Farmers Walk', muscles: ['Ganzkörper', 'Unterarme'], equipment: 'Kurzhantel' },
+  { key: 'kb-swing', name: 'Kettlebell Swing', muscles: ['Gesäß', 'Beinbeuger', 'Ganzkörper'], equipment: 'Kettlebell' },
+  { key: 'farmers-walk-kh', name: 'Farmers Walk', muscles: ['Ganzkörper', 'Unterarme'], equipment: 'Kurzhantel' },
+  { key: 'farmers-walk-kb', name: 'Farmers Walk', muscles: ['Ganzkörper', 'Unterarme'], equipment: 'Kettlebell' },
+  { key: 'turkish-getup', name: 'Turkish Get-up', muscles: ['Ganzkörper'], equipment: 'Kettlebell' },
+  { key: 'umsetzen-druecken', name: 'Umsetzen und Drücken (Clean & Press)', muscles: ['Ganzkörper', 'Schultern'], equipment: 'Langhantel' },
 ];
 
 // Push/Pull/Legs-Zielwerte (Sätze/Wdh./Pause), an Hypertrophie-/Kraft-Richtwerten
 // orientiert: Grundübungen 4-6 Wdh. mit langer Pause, Isolation 10-15 Wdh. kürzer.
+// Referenziert Übungen über den internen "key" (nicht den Namen), da derselbe
+// Name jetzt mehrfach vorkommen darf (siehe LIBRARY_EXERCISES oben).
 const PPL_PLAN = {
   Push: { emoji: '🔴', color: '#ff6b6b', exercises: [
-    ['Bankdrücken', 4, 7, 150],
-    ['Kurzhantel-Schrägbankdrücken', 3, 9, 120],
-    ['Schulterdrücken', 3, 9, 120],
-    ['Seitheben', 3, 14, 60],
-    ['Dips (Brust-Fokus)', 3, 10, 90],
-    ['Trizepsdrücken am Kabel', 3, 11, 60],
+    ['bankdruecken-lh', 4, 7, 150],
+    ['schraegbankdruecken-kh', 3, 9, 120],
+    ['schulterdruecken-lh', 3, 9, 120],
+    ['seitheben-kh', 3, 14, 60],
+    ['dips-brust', 3, 10, 90],
+    ['trizepsdruecken-kabel', 3, 11, 60],
   ] },
   Pull: { emoji: '🔵', color: '#4cc9f0', exercises: [
-    ['Kreuzheben', 3, 5, 180],
-    ['Klimmzüge', 3, 8, 120],
-    ['Rudern vorgebeugt', 3, 9, 120],
-    ['Kabelrudern sitzend (weiter Griff)', 3, 11, 90],
-    ['Facepulls', 3, 17, 60],
-    ['Bizepscurls', 3, 11, 60],
+    ['kreuzheben', 3, 5, 180],
+    ['klimmzuege', 3, 8, 120],
+    ['rudern-vorgebeugt', 3, 9, 120],
+    ['rudern-sitzend-weit', 3, 11, 90],
+    ['facepulls', 3, 17, 60],
+    ['bizepscurls-lh', 3, 11, 60],
   ] },
   Legs: { emoji: '🟢', color: '#46c98b', exercises: [
-    ['Kniebeuge', 4, 7, 180],
-    ['Beinpresse', 3, 11, 120],
-    ['Rumänisches Kreuzheben', 3, 9, 120],
-    ['Ausfallschritte', 3, 11, 90],
-    ['Beinbeuger liegend', 3, 11, 90],
-    ['Wadenheben stehend', 4, 14, 60],
+    ['kniebeuge', 4, 7, 180],
+    ['beinpresse', 3, 11, 120],
+    ['rumaenisches-kreuzheben', 3, 9, 120],
+    ['ausfallschritte-kh', 3, 11, 90],
+    ['beinbeuger-liegend', 3, 11, 90],
+    ['wadenheben-stehend', 4, 14, 60],
   ] },
 };
 
@@ -2505,50 +2612,50 @@ const PPL_PLAN = {
 // unterschiedlicher Übungsauswahl für mehr Abwechslung/Übungsvielfalt).
 const PPL_AB_PLAN = {
   'Push A': { emoji: '🔴A', color: '#ff6b6b', exercises: [
-    ['Bankdrücken', 4, 7, 150],
-    ['Kurzhantel-Schulterdrücken', 3, 9, 120],
-    ['Kurzhantel-Schrägbankdrücken', 3, 11, 100],
-    ['Seitheben', 3, 14, 60],
-    ['Trizepsdrücken am Kabel', 3, 11, 60],
-    ['Dips (Brust-Fokus)', 3, 10, 90],
+    ['bankdruecken-lh', 4, 7, 150],
+    ['schulterdruecken-kh', 3, 9, 120],
+    ['schraegbankdruecken-kh', 3, 11, 100],
+    ['seitheben-kh', 3, 14, 60],
+    ['trizepsdruecken-kabel', 3, 11, 60],
+    ['dips-brust', 3, 10, 90],
   ] },
   'Push B': { emoji: '🔴B', color: '#ff6b6b', exercises: [
-    ['Schrägbankdrücken', 4, 7, 150],
-    ['Schulterdrücken', 3, 9, 120],
-    ['Bankdrücken Multipresse', 3, 11, 100],
-    ['Frontheben', 3, 14, 60],
-    ['Enges Bankdrücken', 3, 8, 100],
-    ['Trizeps-Überkopfstrecken', 3, 11, 60],
+    ['schraegbankdruecken-lh', 4, 7, 150],
+    ['schulterdruecken-lh', 3, 9, 120],
+    ['bankdruecken-mp', 3, 11, 100],
+    ['frontheben-kh', 3, 14, 60],
+    ['enges-bankdruecken', 3, 8, 100],
+    ['trizeps-ueberkopf-kh', 3, 11, 60],
   ] },
   'Pull A': { emoji: '🔵A', color: '#4cc9f0', exercises: [
-    ['Kreuzheben', 3, 5, 180],
-    ['Klimmzüge', 3, 8, 120],
-    ['Rudern vorgebeugt', 3, 9, 120],
-    ['Kabelrudern sitzend (enger Griff)', 3, 11, 90],
-    ['Facepulls', 3, 17, 60],
-    ['Bizepscurls', 3, 11, 60],
+    ['kreuzheben', 3, 5, 180],
+    ['klimmzuege', 3, 8, 120],
+    ['rudern-vorgebeugt', 3, 9, 120],
+    ['rudern-sitzend-eng', 3, 11, 90],
+    ['facepulls', 3, 17, 60],
+    ['bizepscurls-lh', 3, 11, 60],
   ] },
   'Pull B': { emoji: '🔵B', color: '#4cc9f0', exercises: [
-    ['Rumänisches Kreuzheben', 3, 9, 150],
-    ['Latzug (breiter Griff)', 3, 9, 120],
-    ['T-Bar Rudern', 3, 9, 120],
-    ['Reverse Butterfly', 3, 14, 60],
-    ['Hammercurls', 3, 11, 60],
-    ['Kurzhantel-Bizepscurls', 3, 11, 60],
+    ['rumaenisches-kreuzheben', 3, 9, 150],
+    ['latzug-breit', 3, 9, 120],
+    ['t-bar-rudern', 3, 9, 120],
+    ['reverse-butterfly', 3, 14, 60],
+    ['hammercurls-kh', 3, 11, 60],
+    ['bizepscurls-kh', 3, 11, 60],
   ] },
   'Legs A': { emoji: '🟢A', color: '#46c98b', exercises: [
-    ['Kniebeuge', 4, 7, 180],
-    ['Beinpresse', 3, 11, 120],
-    ['Beinbeuger liegend', 3, 11, 90],
-    ['Ausfallschritte', 3, 11, 90],
-    ['Wadenheben stehend', 4, 14, 60],
+    ['kniebeuge', 4, 7, 180],
+    ['beinpresse', 3, 11, 120],
+    ['beinbeuger-liegend', 3, 11, 90],
+    ['ausfallschritte-kh', 3, 11, 90],
+    ['wadenheben-stehend', 4, 14, 60],
   ] },
   'Legs B': { emoji: '🟢B', color: '#46c98b', exercises: [
-    ['Kniebeuge Multipresse', 4, 9, 150],
-    ['Bulgarian Split Squat', 3, 11, 90],
-    ['Beinstrecker', 3, 14, 90],
-    ['Hüftstoßen (Hip Thrust)', 3, 11, 120],
-    ['Wadenheben sitzend', 4, 18, 60],
+    ['kniebeuge-mp', 4, 9, 150],
+    ['bulgarian-split-squat', 3, 11, 90],
+    ['beinstrecker', 3, 14, 90],
+    ['hip-thrust-lh', 3, 11, 120],
+    ['wadenheben-sitzend', 4, 18, 60],
   ] },
 };
 
@@ -2556,37 +2663,51 @@ const PPL_AB_PLAN = {
 // (Push/Pull/Beine), Übungen auf die Bibliothek gemappt.
 const BEEDLE_PLAN = {
   Push: { emoji: '🥊', color: '#f72585', exercises: [
-    ['Bankdrücken', 3, 8, 120],
-    ['Schrägbankdrücken', 3, 10, 100],
-    ['Kurzhantel-Schrägbankdrücken', 3, 10, 100],
-    ['Butterfly', 3, 12, 60],
-    ['Schulterdrücken', 3, 10, 100],
-    ['Seitheben', 3, 12, 60],
-    ['Trizepsdrücken am Kabel', 3, 12, 60],
-    ['Trizeps-Überkopfstrecken', 3, 12, 60],
+    ['bankdruecken-lh', 3, 8, 120],
+    ['schraegbankdruecken-lh', 3, 10, 100],
+    ['schraegbankdruecken-kh', 3, 10, 100],
+    ['butterfly', 3, 12, 60],
+    ['schulterdruecken-lh', 3, 10, 100],
+    ['seitheben-kh', 3, 12, 60],
+    ['trizepsdruecken-kabel', 3, 12, 60],
+    ['trizeps-ueberkopf-kh', 3, 12, 60],
   ] },
   Pull: { emoji: '🪢', color: '#c77dff', exercises: [
-    ['Kreuzheben', 3, 6, 150],
-    ['Latzug (breiter Griff)', 3, 10, 100],
-    ['Kabelrudern sitzend (weiter Griff)', 3, 10, 100],
-    ['Reverse Butterfly', 3, 12, 60],
-    ['T-Bar Rudern', 3, 10, 100],
-    ['Bizepscurls', 3, 10, 60],
-    ['Kurzhantel-Bizepscurls', 3, 10, 60],
+    ['kreuzheben', 3, 6, 150],
+    ['latzug-breit', 3, 10, 100],
+    ['rudern-sitzend-weit', 3, 10, 100],
+    ['reverse-butterfly', 3, 12, 60],
+    ['t-bar-rudern', 3, 10, 100],
+    ['bizepscurls-lh', 3, 10, 60],
+    ['bizepscurls-kh', 3, 10, 60],
   ] },
   Beine: { emoji: '🦶', color: '#ffb454', exercises: [
-    ['Kniebeuge', 3, 8, 120],
-    ['Beinpresse', 3, 10, 100],
-    ['Beinbeuger liegend', 3, 10, 90],
-    ['Beinstrecker', 3, 12, 90],
-    ['Abduktion (Hüfte)', 3, 14, 60],
-    ['Wadenheben stehend', 3, 14, 60],
+    ['kniebeuge', 3, 8, 120],
+    ['beinpresse', 3, 10, 100],
+    ['beinbeuger-liegend', 3, 10, 90],
+    ['beinstrecker', 3, 12, 90],
+    ['abduktion', 3, 14, 60],
+    ['wadenheben-stehend', 3, 14, 60],
   ] },
 };
 
+// Ergänzt Übungen aus der kuratierten LIBRARY_EXERCISES, die in der Bibliothek
+// des Nutzers noch fehlen (Abgleich über findDuplicateExercise: Name+Muskeln+
+// Gerät) - rein additiv, verändert/löscht nichts Bestehendes. So kommen
+// Überarbeitungen der Standard-Bibliothek auch bei bereits eingerichteten
+// Installationen an, ohne die reale Trainingshistorie zu berühren (die einmalige
+// SEED_VERSION-Migration würde dafür alles löschen und neu aufsetzen).
+function addMissingLibraryExercises() {
+  let added = 0;
+  LIBRARY_EXERCISES.forEach(({ key, ...data }) => {
+    if (!DB.findDuplicateExercise(data)) { DB.addExercise(data); added++; }
+  });
+  return added;
+}
+
 function seedInitialContent() {
-  const byName = new Map();
-  LIBRARY_EXERCISES.forEach(e => { byName.set(e.name, DB.addExercise(e)); });
+  const byKey = new Map();
+  LIBRARY_EXERCISES.forEach(({ key, ...data }) => { byKey.set(key, DB.addExercise(data)); });
 
   const loc = DB.addLocation({ name: 'Sports Club Kiel', emoji: '🏋️', color: COLORS[0] });
 
@@ -2594,8 +2715,8 @@ function seedInitialContent() {
     const plan = DB.addPlan({ locationId: loc.id, name: planName, emoji: planEmoji, color: COLORS[0] });
     Object.entries(dayConfig).forEach(([dayName, cfg]) => {
       const day = DB.addDay({ planId: plan.id, name: dayName, emoji: cfg.emoji, color: cfg.color });
-      cfg.exercises.forEach(([exName, sets, reps, restSec]) => {
-        const ex = byName.get(exName);
+      cfg.exercises.forEach(([exKey, sets, reps, restSec]) => {
+        const ex = byKey.get(exKey);
         if (ex) DB.addExerciseToDay(day.id, ex.id, { sets, reps, restSec });
       });
     });

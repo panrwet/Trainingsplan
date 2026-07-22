@@ -87,6 +87,22 @@ export function addExercise(data) {
 export function updateExercise(id, patch) {
   const ex = getExercise(id); if (!ex) return; Object.assign(ex, patch); save(); return ex;
 }
+// Prüft, ob bereits eine Übung mit identischem Name+Muskelgruppen+Gerät existiert
+// (Notiz/Einheit zählen bewusst nicht mit) - für die Warnung beim Anlegen einer
+// möglichen Doppel-Übung. excludeId beim Bearbeiten, damit sich eine Übung beim
+// Speichern nicht selbst als Duplikat meldet.
+export function findDuplicateExercise({ name, muscles, equipment }, excludeId = null) {
+  const nameNorm = (name || '').trim().toLowerCase();
+  const muscleSet = new Set(muscles || []);
+  return db().exercises.find(e => {
+    if (e.id === excludeId) return false;
+    if (e.name.trim().toLowerCase() !== nameNorm) return false;
+    if ((e.equipment || '') !== (equipment || '')) return false;
+    const eMuscles = e.muscles || [];
+    if (eMuscles.length !== muscleSet.size) return false;
+    return eMuscles.every(mu => muscleSet.has(mu));
+  }) || null;
+}
 // Verschiebt die Übung in den Papierkorb (Wiederherstellbar), statt sie
 // endgültig zu löschen. Wird trotzdem aus allen Trainingstagen entfernt -
 // eine Wiederherstellung bringt die Übung nur in die Bibliothek zurück,
