@@ -437,13 +437,14 @@ a { color: var(--accent); }
   background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius-sm);
   margin-bottom: 6px; overflow: hidden;
 }
-.filter-acc summary {
+.filter-acc > summary {
   list-style: none; cursor: pointer; padding: 12px 14px; display: flex; align-items: center;
   font-size: .86rem; font-weight: 650; color: var(--text); min-height: 24px;
 }
-.filter-acc summary::-webkit-details-marker { display: none; }
-.filter-acc summary::after { content: '⌄'; color: var(--text-dim2); margin-left: auto; font-size: 1.5rem; line-height: 1; transition: transform .15s; }
-.filter-acc[open] summary::after { transform: rotate(180deg); }
+.filter-acc > summary::-webkit-details-marker { display: none; }
+.filter-acc > summary::marker { content: ''; display: none; }
+.filter-acc > summary::after { content: '⌄'; color: var(--text-dim2); margin-left: auto; font-size: 1.5rem; line-height: 1; transition: transform .15s; }
+.filter-acc[open] > summary::after { transform: rotate(180deg); }
 .filter-acc .filter-row { padding: 0 10px 10px; }
 .acc-badge {
   background: var(--accent); color: var(--on-accent, #fff); font-size: .7rem; font-weight: 700;
@@ -468,6 +469,7 @@ a { color: var(--accent); }
   padding: 10px 12px;
 }
 .plan-acc summary::-webkit-details-marker { display: none; }
+.plan-acc summary::marker { content: ''; display: none; }
 .plan-acc summary .chip {
   flex: 0 0 auto; width: 38px; height: 38px; border-radius: 11px;
   display: grid; place-items: center; font-size: 1.2rem; font-weight: 700;
@@ -484,14 +486,19 @@ a { color: var(--accent); }
 
 /* ---------- Statistik: auf-/zuklappbare Abschnitte (wie section-title, nur klickbar) ---------- */
 .stats-acc { margin: 0; }
-.stats-acc summary {
+/* Direkter Kind-Selektor (">"), NICHT Nachfahren-Selektor - .stats-acc kann ein
+   .plan-acc verschachtelt enthalten (z.B. "Kardio-Pläne"), das seinen eigenen
+   Aufklapp-Pfeil schon per .acc-chevron-Span mitbringt. Ein Nachfahren-Selektor
+   hier würde zusätzlich EIN ::after auf dessen <summary> malen -> doppelter Pfeil. */
+.stats-acc > summary {
   list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
   margin: 14px 0 6px; padding: 6px 2px; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em;
   color: var(--text-dim2); font-weight: 700; min-height: 20px;
 }
-.stats-acc summary::-webkit-details-marker { display: none; }
-.stats-acc summary::after { content: '⌄'; font-size: 1.6rem; line-height: 1; transition: transform .15s; }
-.stats-acc[open] summary::after { transform: rotate(180deg); }
+.stats-acc > summary::-webkit-details-marker { display: none; }
+.stats-acc > summary::marker { content: ''; display: none; }
+.stats-acc > summary::after { content: '⌄'; font-size: 1.6rem; line-height: 1; transition: transform .15s; }
+.stats-acc[open] > summary::after { transform: rotate(180deg); }
 
 /* ---------- Trainings-Anpassungen nach dem Training (Diff-Modal) ---------- */
 .diff-list { display: flex; flex-direction: column; gap: 2px; }
