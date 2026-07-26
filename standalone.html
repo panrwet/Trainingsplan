@@ -3711,7 +3711,7 @@ let cardioStatsPeriod = 30;
 let cardioStatsAccOpen = { plans: true, overview: true, equipment: false, recent: false };
 
 route('/cardio', () => {
-  setChrome({ title: 'Kardio', back: false, actions: [actionBtn('⚙️', () => manageCardioEquipmentModal())] });
+  setChrome({ title: 'Kardio', back: false, actions: [actionBtn('➕', () => editCardioPlanModal(null)), actionBtn('⚙️', () => manageCardioEquipmentModal())] });
   const plans = DB.cardioPlans();
   let html = '';
 
@@ -3780,7 +3780,6 @@ route('/cardio', () => {
   $$('[data-cstats-equip]', appEl).forEach(n => n.onclick = () => navigate('/cardio-stats/' + encodeURIComponent(n.dataset.cstatsEquip)));
   $$('[data-session]', appEl).forEach(n => n.onclick = () => navigate('/cardio-session/' + n.dataset.session));
   $$('.stats-acc', appEl).forEach(d => d.addEventListener('toggle', () => { cardioStatsAccOpen[d.dataset.acc] = d.open; }));
-  appEl.append(el('button', { class: 'fab', onclick: () => editCardioPlanModal(null) }, '+'));
 });
 
 // HTML für einen Plan inkl. seiner Trainingstage - gemeinsam genutzt von /cardio
@@ -3875,7 +3874,7 @@ function editCardioPlanModal(id) {
 route('/cardio-plan/:id', ({ id }) => {
   const p = DB.getCardioPlan(id);
   if (!p) return navigate('/cardio');
-  setChrome({ title: `${p.emoji} ${p.name}`, back: true, actions: [actionBtn('📈', () => navigate('/cardio-stats-plan/' + id)), actionBtn('✏️', () => editCardioPlanModal(id))] });
+  setChrome({ title: `${p.emoji} ${p.name}`, back: true, actions: [actionBtn('➕', () => editCardioDayModal(null, id)), actionBtn('📈', () => navigate('/cardio-stats-plan/' + id)), actionBtn('✏️', () => editCardioPlanModal(id))] });
   const days = DB.cardioDaysByPlan(id);
   let html = `<div class="section-title">Trainingstage</div>`;
   if (!days.length) {
@@ -3900,7 +3899,6 @@ route('/cardio-plan/:id', ({ id }) => {
   const ids = days.map(d => d.id);
   $$('[data-up]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); moveInArray(ids, n.dataset.up, -1); DB.reorderCardioDays(id, ids); render(); });
   $$('[data-down]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); moveInArray(ids, n.dataset.down, +1); DB.reorderCardioDays(id, ids); render(); });
-  appEl.append(el('button', { class: 'fab', onclick: () => editCardioDayModal(null, id) }, '+'));
 });
 
 function editCardioDayModal(id, planId) {
@@ -3938,7 +3936,7 @@ route('/cardio-day/:id', ({ id }) => {
   const plan = DB.getCardioPlan(day.planId);
 
   function draw() {
-    setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: [actionBtn('📈', () => navigate('/cardio-stats-day/' + id)), actionBtn('✏️', () => editCardioDayModal(id, day.planId))] });
+    setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: [actionBtn('➕', () => pickCardioEquipmentModal(equipment => { DB.addEquipmentToCardioDay(id, equipment); draw(); })), actionBtn('📈', () => navigate('/cardio-stats-day/' + id)), actionBtn('✏️', () => editCardioDayModal(id, day.planId))] });
     let html = `${plan ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(plan.emoji)} ${esc(plan.name)}</div>` : ''}`;
     html += `<button class="btn good block" id="logBtn" style="margin-bottom:16px">📝 Werte eintragen</button>`;
     html += `<div class="section-title">Geräte</div>`;
@@ -3969,9 +3967,6 @@ route('/cardio-day/:id', ({ id }) => {
     $$('[data-rm]', appEl).forEach(n => n.onclick = async () => {
       if (await confirmDialog('Gerät aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) { DB.removeCardioDayActivity(id, n.dataset.rm); draw(); }
     });
-    appEl.append(el('button', { class: 'fab', onclick: () => pickCardioEquipmentModal(equipment => {
-      DB.addEquipmentToCardioDay(id, equipment); draw();
-    }) }, '+'));
   }
   draw();
 });
@@ -4100,10 +4095,15 @@ function manageCardioEquipmentModal() {
 // Ein Eintrag zeigt IMMER alle Felder (Herzfrequenz, Zone, Dauer, km, Stufe,
 // Kalorien, Watt, Höhenmeter) - keines ist Pflicht, Pace/km-h werden daraus
 // live berechnet und nur angezeigt (nicht gespeichert).
-function cardioEntryFieldsHTML(entry) {
+function cardioPaceText(entry) {
   const durationMin = DB.num(entry.durationMin), km = DB.num(entry.km);
-  const pace = (durationMin > 0 && km > 0) ? fmtPace(durationMin / km) : null;
-  const speed = (durationMin > 0 && km > 0) ? Math.round(km / (durationMin / 60) * 10) / 10 : null;
+  if (durationMin > 0 && km > 0) {
+    const speed = Math.round(km / (durationMin / 60) * 10) / 10;
+    return fmtPace(durationMin / km) + ' · ' + speed + ' km/h';
+  }
+  return '–';
+}
+function cardioEntryFieldsHTML(entry) {
   return `
     <div class="ex-head"><div class="ex-name">${esc(entry.equipment || '(kein Gerät)')}</div></div>
     ${(entry.targetDurationMin || entry.targetKm) ? `<div class="tiny muted" style="margin:2px 0 8px">Ziel: ${entry.targetDurationMin ? entry.targetDurationMin + ' Min.' : ''}${entry.targetDurationMin && entry.targetKm ? ' · ' : ''}${entry.targetKm ? entry.targetKm + ' km' : ''}</div>` : ''}
@@ -4120,13 +4120,17 @@ function cardioEntryFieldsHTML(entry) {
     <div class="row3">
       <label class="field"><span>Watt</span><input type="number" inputmode="numeric" min="0" value="${entry.watt === '' ? '' : esc(entry.watt)}" data-f="watt" /></label>
       <label class="field"><span>Höhenmeter</span><input type="number" inputmode="numeric" min="0" value="${entry.elevationM === '' ? '' : esc(entry.elevationM)}" data-f="elevationM" /></label>
-      <div class="field"><span>Pace / km/h</span><div class="tiny muted" style="padding-top:8px">${pace ? pace + ' · ' + speed + ' km/h' : '–'}</div></div>
+      <div class="field"><span>Pace / km/h</span><div class="tiny muted" data-pace style="padding-top:8px">${cardioPaceText(entry)}</div></div>
     </div>
   `;
 }
 function wireCardioEntryFields(block, entry, onChange) {
   $$('[data-f]', block).forEach(inp => inp.oninput = () => {
     entry[inp.dataset.f] = inp.value;
+    if (inp.dataset.f === 'durationMin' || inp.dataset.f === 'km') {
+      const paceEl = $('[data-pace]', block);
+      if (paceEl) paceEl.textContent = cardioPaceText(entry);
+    }
     onChange(inp.dataset.f);
   });
 }
@@ -4161,8 +4165,8 @@ route('/cardio-log/:dayId', ({ dayId }) => {
   $('#t-note', appEl).oninput = e => { draft.note = e.target.value; };
   $$('[data-entry]', appEl).forEach((block, i) => {
     const entry = draft.entries[i];
-    const redrawBlock = () => { block.innerHTML = cardioEntryFieldsHTML(entry); wireCardioEntryFields(block, entry, f => { if (f === 'durationMin' || f === 'km') redrawBlock(); }); };
-    redrawBlock();
+    block.innerHTML = cardioEntryFieldsHTML(entry);
+    wireCardioEntryFields(block, entry, () => {});
   });
   $('#saveBtn', appEl).onclick = async () => {
     const hasAny = draft.entries.some(DB.isCardioEntryDone);
@@ -4228,8 +4232,8 @@ route('/cardio-session/:id', ({ id }) => {
     $('#t-note', appEl).oninput = e => DB.updateCardioSession(id, { note: e.target.value });
     $$('[data-entry]', appEl).forEach((block, i) => {
       const entry = s.entries[i];
-      const redrawBlock = () => { block.innerHTML = cardioEntryFieldsHTML(entry); wireCardioEntryFields(block, entry, f => { DB.save(); if (f === 'durationMin' || f === 'km') redrawBlock(); }); };
-      redrawBlock();
+      block.innerHTML = cardioEntryFieldsHTML(entry);
+      wireCardioEntryFields(block, entry, () => DB.save());
     });
   }
   draw();
