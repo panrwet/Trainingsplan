@@ -267,6 +267,7 @@ function render() {
 function updateTabs(hash) {
   let active = 'plans';
   if (hash.startsWith('/plans') || hash.startsWith('/plan') || hash.startsWith('/day') || hash.startsWith('/train')) active = 'plans';
+  else if (hash.startsWith('/cardio')) active = 'cardio';
   else if (hash.startsWith('/calendar')) active = 'calendar';
   else if (hash.startsWith('/stats')) active = 'stats';
   else if (hash.startsWith('/library') || hash.startsWith('/exercise')) active = 'library';
@@ -1840,6 +1841,702 @@ function emptyTrainingFinishModal() {
 }
 
 // ============================================================
+//  Ansicht: Kardio (eigener Tab - Pläne UND Statistik zusammen, siehe README).
+//  Bewusst NICHT an einen Ort gebunden (anders als Krafttraining) - Laufen/
+//  Radfahren findet oft draußen statt.
+// ============================================================
+let cardioStatsPeriod = 30;
+let cardioStatsAccOpen = { plans: true, overview: true, activities: false, recent: false };
+
+route('/cardio', () => {
+  setChrome({ title: 'Kardio', back: false, actions: [actionBtn('⚙️', () => cardioSettingsSheet())] });
+  const plans = DB.cardioPlans();
+  const unfinished = DB.cardioSessions().filter(s => !s.finishedAt);
+  let html = '';
+
+  if (unfinished.length) {
+    html += `<div class="section-title">Laufendes Kardio-Training</div>`;
+    unfinished.forEach(s => {
+      html += `<div class="card tap" data-goto="/cardio-train/${s.id}">
+        <div class="train-head">
+          <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '🏃')}</div>
+          <div style="flex:1">
+            <div style="font-weight:700">${esc(s.dayName || 'Kardio-Training')}</div>
+            <div class="tiny muted">${fmtDate(s.date)}</div>
+          </div>
+          <span class="btn primary sm">Weiter ›</span>
+        </div>
+      </div>`;
+    });
+  }
+
+  html += `<details class="stats-acc" data-acc="plans" ${cardioStatsAccOpen.plans ? 'open' : ''}><summary>Kardio-Pläne</summary>`;
+  if (!plans.length) {
+    html += `<div class="empty"><div class="big">🏃</div><div>Noch keine Kardio-Pläne.</div>
+      <div class="tiny" style="margin:8px 0 0">Tippe unten auf „＋".</div></div>`;
+  } else {
+    plans.forEach(p => {
+      const days = DB.cardioDaysByPlan(p.id);
+      html += `<details class="plan-acc">
+        <summary>
+          <div class="chip" style="background:${esc(p.color)}22;color:${esc(p.color)}">${esc(p.emoji)}</div>
+          <div class="grow"><div class="r-title">${esc(p.name)}</div>
+            <div class="r-sub">${days.length} Trainingstage</div></div>
+          <button class="btn ghost sm" data-edit-cplan="${p.id}" title="Plan verwalten">✏️</button>
+          <span class="acc-chevron">⌄</span>
+        </summary>
+        <div class="plan-acc-body">
+          ${days.length ? days.map(day => `<div class="list-row" data-start-cday="${day.id}">
+              <div class="chip" style="background:${esc(day.color)}22;color:${esc(day.color)}">${esc(day.emoji)}</div>
+              <div class="grow"><div class="r-title">${esc(day.name)}</div>
+                <div class="r-sub">${day.activities.length} Aktivität(en)</div></div>
+              <span class="btn good sm">Start ▶</span>
+            </div>`).join('') : `<div class="tiny muted center" style="padding:8px 4px">Noch keine Trainingstage – tippe auf ✏️ zum Einrichten.</div>`}
+        </div>
+      </details>`;
+    });
+  }
+  html += `</details>`;
+
+  // ---------- Statistik ----------
+  const totalFinished = DB.cardioSessions().filter(s => s.finishedAt).length;
+  const periodCount = DB.cardioSessionCountInPeriod(cardioStatsPeriod);
+  const minutesTrend = DB.weeklyCardioMinutesTrend(10);
+  const minutesChart = lineChart(minutesTrend.map(b => ({ y: b.minutes, label: fmtTs(b.weekEndTs) })), 'Min.');
+  const topActs = DB.topCardioActivitiesByFrequency(cardioStatsPeriod, 5);
+  const allActs = DB.cardioActivities();
+
+  html += `<details class="stats-acc" data-acc="overview" ${cardioStatsAccOpen.overview ? 'open' : ''}><summary>Kardio-Statistik</summary>
+    <div class="btn-row" style="margin-bottom:12px">
+      <button class="btn ${cardioStatsPeriod === 7 ? 'primary' : 'ghost'} sm" data-cperiod="7">7 Tage</button>
+      <button class="btn ${cardioStatsPeriod === 30 ? 'primary' : 'ghost'} sm" data-cperiod="30">30 Tage</button>
+      <button class="btn ${!cardioStatsPeriod ? 'primary' : 'ghost'} sm" data-cperiod="0">Alle</button>
+    </div>
+    <div class="streak-row">
+      <div class="stat-tile"><div class="v">${totalFinished}</div><div class="l">Einheiten gesamt</div></div>
+      <div class="stat-tile"><div class="v">${periodCount}</div><div class="l">Einheiten (${cardioStatsPeriod ? cardioStatsPeriod + ' Tage' : 'alle'})</div></div>
+    </div>
+    <div class="chart-wrap"><div class="c-title"><span>Trainingsminuten je Woche (letzte ${minutesTrend.length})</span></div>${minutesChart}</div>
+    <div class="card">
+      <div class="tiny muted" style="margin-bottom:6px">Meisttrainierte Aktivitäten · ${cardioStatsPeriod ? cardioStatsPeriod + ' Tage' : 'alle Zeit'}</div>
+      ${topActs.length ? topActs.map(t => {
+          const stillExists = !!DB.getCardioActivity(t.activityId);
+          return `<div class="list-row ${stillExists ? '' : 'disabled'}" ${stillExists ? `data-cstats="${t.activityId}"` : ''}>
+          <div class="grow"><div class="r-title">${esc(t.name)}</div></div>
+          <div class="tiny muted">${t.count}×</div></div>`;
+        }).join('')
+        : `<div class="tiny muted center" style="padding:8px">Keine Daten in diesem Zeitraum.</div>`}
+    </div>
+  </details>`;
+
+  html += `<details class="stats-acc" data-acc="activities" ${cardioStatsAccOpen.activities ? 'open' : ''}><summary>Aktivitäten</summary>`;
+  if (!allActs.length) {
+    html += `<div class="tiny muted center" style="padding:12px">Noch keine Kardio-Aktivitäten angelegt.</div>`;
+  } else {
+    allActs.forEach(a => {
+      const stat = DB.cardioActivityStats(a.id);
+      html += `<div class="list-row" data-cstats="${a.id}">
+        <div class="grow"><div class="r-title">${esc(a.name)}</div>
+          ${tagBadgesHTML({ equipment: a.equipment, muscles: [] })}
+          ${stat.sessionsCount ? `<div class="r-sub">${stat.sessionsCount}× · ${fmtWeight(stat.maxKm)} km max · ${stat.longestMin} Min. längste</div>` : ''}</div>
+        <span class="arrow">›</span></div>`;
+    });
+  }
+  html += `</details>`;
+
+  // ---------- Letzte Kardio-Trainings ----------
+  const recentSessions = DB.cardioSessions().filter(s => s.finishedAt).slice(0, 10);
+  html += `<details class="stats-acc" data-acc="recent" ${cardioStatsAccOpen.recent ? 'open' : ''}><summary>Letzte Kardio-Trainings</summary>`;
+  html += recentSessions.length
+    ? recentSessions.map(cardioSessionRow).join('')
+    : `<div class="tiny muted center" style="padding:12px">Noch keine abgeschlossenen Kardio-Trainings.</div>`;
+  html += `</details>`;
+
+  appEl.innerHTML = html;
+  $$('[data-goto]', appEl).forEach(n => n.onclick = () => navigate(n.dataset.goto));
+  $$('[data-edit-cplan]', appEl).forEach(b => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); navigate('/cardio-plan/' + b.dataset.editCplan); });
+  $$('[data-start-cday]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); startCardioTraining(n.dataset.startCday); });
+  $$('[data-cperiod]', appEl).forEach(n => n.onclick = () => { cardioStatsPeriod = parseInt(n.dataset.cperiod) || null; render(); });
+  $$('[data-cstats]', appEl).forEach(n => n.onclick = () => navigate('/cardio-stats/' + n.dataset.cstats));
+  $$('[data-session]', appEl).forEach(n => n.onclick = () => navigate('/cardio-train/' + n.dataset.session));
+  $$('.stats-acc', appEl).forEach(d => d.addEventListener('toggle', () => { cardioStatsAccOpen[d.dataset.acc] = d.open; }));
+  appEl.append(el('button', { class: 'fab', onclick: () => editCardioPlanModal(null) }, '+'));
+});
+
+// Läuft für diesen Kardio-Tag schon eine unbeendete Einheit, wird diese
+// fortgesetzt statt eine weitere parallele Einheit anzulegen.
+function startCardioTraining(dayId) {
+  const existing = DB.cardioSessions().find(x => x.dayId === dayId && !x.finishedAt);
+  const s = existing || DB.startCardioSession(dayId);
+  if (s) navigate('/cardio-train/' + s.id);
+}
+
+// Zeile für "Letzte Kardio-Trainings" (analog sessionRow beim Krafttraining) -
+// zeigt je Aktivität die wichtigste Kennzahl (Dauer, ggf. km) statt Sätze/Volumen.
+function cardioSessionRow(s) {
+  const done = (s.entries || []).filter(DB.isCardioEntryDone);
+  const totalMin = done.reduce((a, e) => a + DB.num(e.durationMin), 0);
+  const totalKm = done.reduce((a, e) => a + DB.num(e.km), 0);
+  const duration = s.startedAt && s.finishedAt ? fmtDuration(s.finishedAt - s.startedAt) : '';
+  return `<div class="list-row" data-session="${s.id}">
+    <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '🏃')}</div>
+    <div class="grow"><div class="r-title">${esc(s.dayName || 'Kardio-Training')}</div>
+      <div class="r-sub">${fmtDate(s.date)}${duration ? ' · ' + duration : ''} · ${totalMin} Min.${totalKm ? ' · ' + fmtWeight(totalKm) + ' km' : ''}</div></div>
+    <span class="arrow">›</span></div>`;
+}
+
+// Formatiert Pace (Minuten pro km) als "5:30/km" statt Dezimalzahl.
+function fmtPace(minPerKm) {
+  if (!minPerKm || minPerKm <= 0) return '–';
+  const min = Math.floor(minPerKm);
+  const sec = Math.round((minPerKm - min) * 60);
+  return `${min}:${String(sec).padStart(2, '0')}/km`;
+}
+
+// Einstellungen für den Kardio-Tab, gebündelt hinter einem Sheet (analog
+// trainSettingsModal) - hält die Hauptansicht schlank.
+function cardioSettingsSheet() {
+  openModal({
+    title: 'Kardio – Einstellungen',
+    body: `<div class="sheet">
+      <button class="sheet-btn" data-act="activities">🏃 Kardio-Aktivitäten verwalten</button>
+      <button class="sheet-btn" data-act="equipment">⚙️ Kardio-Geräte verwalten</button>
+    </div>`,
+    footer: `<button class="btn ghost block" data-x>Schließen</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('[data-act="activities"]', m).onclick = () => { close(); manageCardioActivitiesModal(); };
+      $('[data-act="equipment"]', m).onclick = () => { close(); manageCardioEquipmentModal(); };
+    },
+  });
+}
+
+// ---------- Kardio-Pläne / -Trainingstage bearbeiten ----------
+function editCardioPlanModal(id) {
+  const p = id ? DB.getCardioPlan(id) : { name: '', emoji: '🏃', color: COLORS[3] };
+  openModal({
+    title: id ? 'Kardio-Plan bearbeiten' : 'Neuer Kardio-Plan',
+    body: `
+      <label class="field"><span>Name</span><input id="f-name" value="${esc(p.name)}" placeholder="z.B. Ausdauer" /></label>
+      ${symbolField(p.emoji, 'plan')}
+      ${colorField(p.color)}`,
+    footer: `${id ? '<button class="btn danger" data-del>Löschen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      const sc = wireSymbolColor(m);
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        const name = $('#f-name', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        const data = { name, emoji: sc.getEmoji() || '🏃', color: sc.getColor() };
+        if (id) { DB.updateCardioPlan(id, data); close(); render(); }
+        else { DB.addCardioPlan(data); close(); render(); }
+      };
+      const del = $('[data-del]', m);
+      if (del) del.onclick = async () => {
+        if (await confirmDialog('Kardio-Plan inkl. Trainingstage löschen?', { danger: true, okText: 'Löschen' })) {
+          DB.deleteCardioPlan(id); close(); navigate('/cardio');
+        }
+      };
+    },
+  });
+}
+
+route('/cardio-plan/:id', ({ id }) => {
+  const p = DB.getCardioPlan(id);
+  if (!p) return navigate('/cardio');
+  setChrome({ title: `${p.emoji} ${p.name}`, back: true, actions: [actionBtn('✏️', () => editCardioPlanModal(id))] });
+  const days = DB.cardioDaysByPlan(id);
+  let html = `<div class="section-title">Trainingstage</div>`;
+  if (!days.length) {
+    html += `<div class="empty"><div class="big">🏃</div><div>Noch keine Trainingstage.</div>
+      <div class="tiny" style="margin:8px 0 0">Ein Trainingstag ist z.B. „Grundlagenausdauer" oder „Intervalle".</div></div>`;
+  } else {
+    days.forEach((day, i) => {
+      html += `<div class="list-row" data-cday="${day.id}">
+        <div class="chip" style="background:${esc(day.color)}22;color:${esc(day.color)}">${esc(day.emoji)}</div>
+        <div class="grow"><div class="r-title">${esc(day.name)}</div>
+          <div class="r-sub">${day.activities.length} Aktivität(en)</div></div>
+        <span class="mv" data-up="${day.id}" style="padding:4px 8px;color:var(--text-dim2)">▲</span>
+        <span class="mv" data-down="${day.id}" style="padding:4px 8px;color:var(--text-dim2)">▼</span>
+        <span class="arrow">›</span></div>`;
+    });
+  }
+  appEl.innerHTML = html;
+  $$('[data-cday]', appEl).forEach(n => n.onclick = (e) => { if (e.target.closest('.mv')) return; navigate('/cardio-day/' + n.dataset.cday); });
+  const ids = days.map(d => d.id);
+  $$('[data-up]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); moveInArray(ids, n.dataset.up, -1); DB.reorderCardioDays(id, ids); render(); });
+  $$('[data-down]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); moveInArray(ids, n.dataset.down, +1); DB.reorderCardioDays(id, ids); render(); });
+  appEl.append(el('button', { class: 'fab', onclick: () => editCardioDayModal(null, id) }, '+'));
+});
+
+function editCardioDayModal(id, planId) {
+  const day = id ? DB.getCardioDay(id) : { name: '', emoji: '🏃', color: COLORS[3], planId };
+  openModal({
+    title: id ? 'Trainingstag bearbeiten' : 'Neuer Trainingstag',
+    body: `
+      <label class="field"><span>Name</span><input id="f-name" value="${esc(day.name)}" placeholder="z.B. Grundlagenausdauer" /></label>
+      ${symbolField(day.emoji, 'day')}
+      ${colorField(day.color)}`,
+    footer: `${id ? '<button class="btn danger" data-del>Löschen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      const sc = wireSymbolColor(m);
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        const name = $('#f-name', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        const data = { name, emoji: sc.getEmoji() || '🏃', color: sc.getColor() };
+        if (id) { DB.updateCardioDay(id, data); close(); render(); }
+        else { const nd = DB.addCardioDay({ ...data, planId: day.planId }); close(); navigate('/cardio-day/' + nd.id); }
+      };
+      const del = $('[data-del]', m);
+      if (del) del.onclick = async () => {
+        if (await confirmDialog('Trainingstag löschen?', { danger: true, okText: 'Löschen' })) {
+          const pid = day.planId; DB.deleteCardioDay(id); close(); navigate('/cardio-plan/' + pid);
+        }
+      };
+    },
+  });
+}
+
+route('/cardio-day/:id', ({ id }) => {
+  const day = DB.getCardioDay(id);
+  if (!day) return navigate('/cardio');
+  const plan = DB.getCardioPlan(day.planId);
+
+  function draw() {
+    setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: [actionBtn('✏️', () => editCardioDayModal(id, day.planId))] });
+    let html = `${plan ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(plan.emoji)} ${esc(plan.name)}</div>` : ''}`;
+    html += `<button class="btn good block" id="startBtn" style="margin-bottom:16px">▶ Training starten</button>`;
+    html += `<div class="section-title">Aktivitäten</div>`;
+    if (!day.activities.length) {
+      html += `<div class="empty"><div class="big">🏃</div><div>Noch keine Aktivitäten.</div>
+        <div class="tiny" style="margin:8px 0 0">Füge Aktivitäten aus deiner Kardio-Bibliothek hinzu.</div></div>`;
+    } else {
+      day.activities.forEach((item, idx) => {
+        const act = DB.getCardioActivity(item.activityId);
+        html += `<div class="card" data-item="${item.id}">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="grow">
+              <b>${esc(act ? act.name : '(gelöscht)')}</b>
+              ${act ? tagBadgesHTML({ equipment: act.equipment, muscles: [] }) : ''}
+              <div class="tiny muted" style="margin-top:4px">${item.targetDurationMin ? item.targetDurationMin + ' Min.' : ''}${item.targetDurationMin && item.targetKm ? ' · ' : ''}${item.targetKm ? item.targetKm + ' km' : ''}${!item.targetDurationMin && !item.targetKm ? 'Kein Ziel gesetzt' : ''}</div>
+            </div>
+            <span class="mv" data-up="${item.id}" style="padding:4px 8px;color:${idx === 0 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${idx === 0 ? 'none' : 'auto'}">▲</span>
+            <span class="mv" data-down="${item.id}" style="padding:4px 8px;color:${idx === day.activities.length - 1 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${idx === day.activities.length - 1 ? 'none' : 'auto'}">▼</span>
+            <button class="btn ghost sm" data-edit="${item.id}">✏️</button>
+            <button class="btn ghost sm" data-rm="${item.id}">🗑️</button>
+          </div>
+        </div>`;
+      });
+    }
+    appEl.innerHTML = html;
+    $('#startBtn', appEl).onclick = () => { if (!day.activities.length) return toast('Erst Aktivitäten hinzufügen'); startCardioTraining(id); };
+    $$('[data-up]', appEl).forEach(n => n.onclick = () => { DB.moveCardioDayActivity(id, n.dataset.up, -1); draw(); });
+    $$('[data-down]', appEl).forEach(n => n.onclick = () => { DB.moveCardioDayActivity(id, n.dataset.down, 1); draw(); });
+    $$('[data-edit]', appEl).forEach(n => n.onclick = () => editCardioDayActivityModal(id, n.dataset.edit, draw));
+    $$('[data-rm]', appEl).forEach(n => n.onclick = async () => {
+      if (await confirmDialog('Aktivität aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) { DB.removeCardioDayActivity(id, n.dataset.rm); draw(); }
+    });
+    appEl.append(el('button', { class: 'fab', onclick: () => pickCardioActivityModal(actId => {
+      DB.addActivityToCardioDay(id, actId); draw();
+    }, day.activities.map(x => x.activityId)) }, '+'));
+  }
+  draw();
+});
+
+function editCardioDayActivityModal(dayId, itemId, onSaved) {
+  const item = DB.getCardioDay(dayId).activities.find(x => x.id === itemId);
+  openModal({
+    title: 'Ziel anpassen',
+    body: `
+      <div class="row3">
+        <label class="field"><span>Ziel-Dauer (Min.)</span><input id="f-min" type="number" inputmode="numeric" min="0" value="${esc(item.targetDurationMin ?? '')}" /></label>
+        <label class="field"><span>Ziel-Distanz (km)</span><input id="f-km" type="number" inputmode="decimal" step="0.1" min="0" value="${esc(item.targetKm ?? '')}" /></label>
+      </div>`,
+    footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        DB.updateCardioDayActivity(dayId, itemId, { targetDurationMin: $('#f-min', m).value, targetKm: $('#f-km', m).value });
+        close(); if (onSaved) onSaved();
+      };
+    },
+  });
+}
+
+// ---------- Kardio-Aktivitäts-Auswahl (analog pickExerciseModal, ohne Muskelfilter) ----------
+function pickCardioActivityModal(onPick, excludeIds = []) {
+  const list = DB.cardioActivities();
+  const excludeSet = new Set(excludeIds);
+  const equipList = DB.cardioEquipmentTypes();
+  let equipFilter = new Set();
+  const body = `
+    <input id="f-search" placeholder="Aktivität suchen …" style="margin-bottom:10px" />
+    <div class="filter-row" style="margin-bottom:10px" id="cequipFilter">${equipList.map(eq => `<button type="button" class="filter-chip" data-fe="${esc(eq.name)}">${esc(eq.name)}</button>`).join('')}</div>
+    <button class="btn primary block" id="newAct" style="margin:0 0 12px">+ Neue Aktivität anlegen</button>
+    <div id="actList"></div>`;
+  openModal({
+    title: 'Aktivität wählen',
+    body,
+    onMount: (m, close) => {
+      const listEl = $('#actList', m);
+      const draw = (q = '') => {
+        const items = list.filter(a => (!q || a.name.toLowerCase().includes(q.toLowerCase())) && (!equipFilter.size || equipFilter.has(a.equipment)));
+        listEl.innerHTML = items.length ? items.map(a => {
+          const dup = excludeSet.has(a.id);
+          return `<div class="list-row ${dup ? 'disabled' : ''}" ${dup ? '' : `data-pick="${a.id}"`}>
+            <div class="grow"><div class="r-title">${esc(a.name)}</div>
+              ${tagBadgesHTML({ equipment: a.equipment, muscles: [] })}
+              ${dup ? '<div class="tiny muted">Bereits in diesem Trainingstag</div>' : ''}</div>
+            <span class="arrow">${dup ? '' : '＋'}</span></div>`;
+        }).join('') : `<div class="tiny muted center" style="padding:12px">Keine Aktivität gefunden.</div>`;
+        $$('[data-pick]', listEl).forEach(n => n.onclick = () => { close(); onPick(n.dataset.pick); });
+      };
+      draw();
+      $$('[data-fe]', m).forEach(b => b.onclick = () => {
+        const eq = b.dataset.fe;
+        equipFilter.has(eq) ? equipFilter.delete(eq) : equipFilter.add(eq);
+        b.classList.toggle('sel');
+        draw($('#f-search', m).value);
+      });
+      $('#f-search', m).oninput = e => draw(e.target.value);
+      $('#newAct', m).onclick = () => { close(); editCardioActivityModal(null, newId => onPick(newId)); };
+    },
+  });
+}
+
+// ---------- Kardio-Aktivitäten verwalten (analog Übungsbibliothek, ohne Muskeln) ----------
+function manageCardioActivitiesModal() {
+  function draw(m) {
+    const listEl = $('#cactList', m);
+    const list = DB.cardioActivities();
+    listEl.innerHTML = list.length ? list.map(a => {
+      const usage = DB.cardioActivityUsage(a.id);
+      return `<div class="list-row" data-act="${a.id}">
+        <div class="grow"><div class="r-title">${esc(a.name)}</div>
+          ${tagBadgesHTML({ equipment: a.equipment, muscles: [] })}
+          ${usage ? `<div class="r-sub">${usage}× trainiert</div>` : ''}</div>
+        <button class="btn ghost sm" data-edit="${a.id}">✏️</button></div>`;
+    }).join('') : `<div class="tiny muted center" style="padding:12px">Noch keine Kardio-Aktivitäten.</div>`;
+    $$('[data-edit]', listEl).forEach(n => n.onclick = () => editCardioActivityModal(n.dataset.edit, () => draw(m)));
+  }
+  openModal({
+    title: 'Kardio-Aktivitäten',
+    body: `<button class="btn primary block" id="newAct" style="margin-bottom:12px">+ Neue Aktivität anlegen</button>
+      <div id="cactList"></div>`,
+    footer: `<button class="btn ghost block" data-x>Fertig</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('#newAct', m).onclick = () => editCardioActivityModal(null, () => draw(m));
+      draw(m);
+    },
+  });
+}
+
+function editCardioActivityModal(id, onSaved) {
+  const a = id ? DB.getCardioActivity(id) : { name: '', equipment: '', notes: '' };
+  const usage = id ? DB.cardioActivityUsage(id) : 0;
+  let equipment = a.equipment || '';
+  openModal({
+    title: id ? 'Aktivität bearbeiten' : 'Neue Kardio-Aktivität',
+    body: `
+      <label class="field"><span>Name</span><input id="f-name" value="${esc(a.name)}" placeholder="z.B. Grundlagenausdauer" /></label>
+      <label class="field"><span>Gerät</span></label>
+      <div class="filter-row" id="f-equip" style="margin:-4px 0 12px"></div>
+      <label class="field"><span>Notiz (optional)</span><textarea id="f-notes" placeholder="z.B. Route, Einstellungen …">${esc(a.notes || '')}</textarea></label>`,
+    footer: `${id ? '<button class="btn danger" data-del>Löschen</button>' : ''}<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
+    onMount: (m, close) => {
+      function redrawEquip() {
+        const equipList = DB.cardioEquipmentTypes();
+        $('#f-equip', m).innerHTML = equipList.map(eq => `<button type="button" class="filter-chip ${equipment === eq.name ? 'sel' : ''}" data-e="${esc(eq.name)}">${esc(eq.name)}</button>`).join('')
+          + `<button type="button" class="filter-chip add" data-add-eq>+ Neu</button>`;
+        $$('[data-e]', m).forEach(b => b.onclick = () => { equipment = equipment === b.dataset.e ? '' : b.dataset.e; redrawEquip(); });
+        $('[data-add-eq]', m).onclick = () => quickAddCardioEquipment(name => { equipment = name; redrawEquip(); });
+      }
+      redrawEquip();
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = async () => {
+        const name = $('#f-name', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        const data = { name, equipment, notes: $('#f-notes', m).value.trim() };
+        const dup = DB.findDuplicateCardioActivity(data, id);
+        if (dup) {
+          const ok = await confirmDialog(`Es gibt bereits eine Aktivität „${dup.name}" mit demselben Gerät. Trotzdem als weitere Aktivität anlegen?`, { okText: 'Trotzdem anlegen' });
+          if (!ok) return;
+        }
+        let savedId = id;
+        if (id) DB.updateCardioActivity(id, data); else savedId = DB.addCardioActivity(data).id;
+        close();
+        if (onSaved) onSaved(savedId);
+      };
+      const del = $('[data-del]', m);
+      if (del) del.onclick = async () => {
+        const warn = usage ? `Diese Aktivität wurde ${usage}× trainiert. Beim Löschen bleiben die Einheiten erhalten, aber die Statistik ist nicht mehr erreichbar. Trotzdem löschen?` : 'Aktivität löschen?';
+        if (await confirmDialog(warn, { danger: true, okText: 'Löschen' })) { DB.deleteCardioActivity(id); close(); if (onSaved) onSaved(); }
+      };
+    },
+  });
+}
+
+function quickAddCardioEquipment(onAdded) {
+  openModal({
+    title: 'Neue Kardio-Geräte-Art',
+    body: `<label class="field"><span>Name</span><input id="f-eqname" placeholder="z.B. Ski-Ergometer" /></label>`,
+    footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Anlegen</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('[data-ok]', m).onclick = () => {
+        const name = $('#f-eqname', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        const eq = DB.addCardioEquipment(name);
+        close(); onAdded(eq.name);
+      };
+      $('#f-eqname', m).focus();
+    },
+  });
+}
+
+function manageCardioEquipmentModal() {
+  let editingId = null;
+  function draw(m) {
+    const list = DB.cardioEquipmentTypes();
+    const listEl = $('#ceqList', m);
+    listEl.innerHTML = list.length ? list.map(e => {
+      const uses = DB.cardioEquipmentUsage(e.id);
+      if (editingId === e.id) {
+        return `<div class="list-row" data-eq="${e.id}">
+          <input id="f-rename-${e.id}" value="${esc(e.name)}" style="flex:1" />
+          <button class="btn ghost sm" data-save="${e.id}">✓</button>
+          <button class="btn ghost sm" data-cancel="${e.id}">✕</button>
+        </div>`;
+      }
+      return `<div class="list-row" data-eq="${e.id}">
+        <div class="grow"><div class="r-title">${esc(e.name)}</div><div class="r-sub">${uses ? uses + '× verwendet' : 'unbenutzt'}</div></div>
+        <button class="btn ghost sm" data-rename="${e.id}">✏️</button>
+        <button class="btn ghost sm" data-del="${e.id}">🗑️</button>
+      </div>`;
+    }).join('') : `<div class="tiny muted center" style="padding:10px">Noch keine Geräte-Arten.</div>`;
+    $$('[data-rename]', listEl).forEach(b => b.onclick = () => { editingId = b.dataset.rename; draw(m); });
+    $$('[data-cancel]', listEl).forEach(b => b.onclick = () => { editingId = null; draw(m); });
+    $$('[data-save]', listEl).forEach(b => b.onclick = () => {
+      const rid = b.dataset.save;
+      const val = $(`#f-rename-${rid}`, listEl).value.trim();
+      if (val) DB.renameCardioEquipment(rid, val);
+      editingId = null; draw(m);
+    });
+    $$('[data-del]', listEl).forEach(b => b.onclick = async () => {
+      const rid = b.dataset.del; const eq = DB.getCardioEquipmentType(rid); const uses = DB.cardioEquipmentUsage(rid);
+      const warn = uses ? `„${eq.name}" wird bei ${uses} Aktivität(en) verwendet. Beim Löschen wird das Gerät dort entfernt. Trotzdem löschen?` : `„${eq.name}" löschen?`;
+      if (await confirmDialog(warn, { danger: true, okText: 'Löschen' })) { DB.deleteCardioEquipment(rid); draw(m); }
+    });
+  }
+  openModal({
+    title: 'Kardio-Geräte-Arten',
+    body: `<div class="btn-row" style="margin-bottom:12px">
+        <input id="f-newEq" placeholder="Neue Geräte-Art, z.B. Ski-Ergometer" style="flex:1" />
+        <button class="btn primary" id="addEqBtn">+ Anlegen</button>
+      </div>
+      <div id="ceqList"></div>`,
+    footer: `<button class="btn ghost" data-x>Fertig</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('#addEqBtn', m).onclick = () => {
+        const name = $('#f-newEq', m).value.trim();
+        if (!name) return toast('Bitte einen Namen eingeben');
+        DB.addCardioEquipment(name);
+        $('#f-newEq', m).value = '';
+        draw(m);
+      };
+      draw(m);
+    },
+  });
+}
+
+// ---------- Kardio-Training (Logging) ----------
+route('/cardio-train/:id', ({ id }) => {
+  const s = DB.getCardioSession(id);
+  if (!s) return navigate('/cardio');
+  const container = el('div');
+  renderCardioTrain(container, id);
+  appEl.innerHTML = '';
+  appEl.append(container);
+});
+
+function discardCardioSession(id) {
+  confirmDialog('Dieses Kardio-Training verwerfen und löschen?', { danger: true, okText: 'Verwerfen' }).then(ok => {
+    if (ok) { DB.deleteCardioSession(id); navigate('/cardio'); }
+  });
+}
+
+function emptyCardioFinishModal() {
+  return new Promise(resolve => {
+    openModal({
+      title: 'Keine Werte eingetragen',
+      body: `<p style="margin:0">Du hast in diesem Kardio-Training noch keine Dauer oder Distanz eingetragen. Trotzdem als abgeschlossen speichern, oder das Training verwerfen?</p>`,
+      footer: `<button class="btn danger" data-discard>Verwerfen</button><button class="btn primary" data-save>Speichern</button>`,
+      onDismiss: () => resolve(null),
+      onMount: (m, close) => {
+        $('[data-discard]', m).onclick = () => { close(); resolve('discard'); };
+        $('[data-save]', m).onclick = () => { close(); resolve('save'); };
+      },
+    });
+  });
+}
+
+function renderCardioTrain(container, id) {
+  const s = DB.getCardioSession(id);
+  if (!s) return;
+  const finished = !!s.finishedAt;
+  setChrome({
+    title: s.dayName || 'Kardio-Training', back: true,
+    actions: [actionBtn('➕', () => pickCardioActivityModal(actId => {
+      const act = DB.getCardioActivity(actId);
+      const s2 = DB.getCardioSession(id);
+      s2.entries.push({ activityId: actId, name: act ? act.name : 'Aktivität', equipment: act ? act.equipment : '', targetDurationMin: '', targetKm: '', heartRate: '', zone: '', durationMin: '', km: '', level: '', calories: '', watt: '', elevationM: '' });
+      DB.save(); renderCardioTrain(container, id);
+    }, s.entries.map(e => e.activityId))), actionBtn('🗑️', () => discardCardioSession(id))],
+  });
+
+  let html = `
+    <div class="card">
+      <div class="train-head">
+        <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '🏃')}</div>
+        <div style="flex:1">
+          <div style="font-weight:700">${esc(s.dayName || 'Kardio-Training')}</div>
+          <input id="t-date" type="date" value="${esc(s.date)}" style="margin-top:6px;width:auto" />
+        </div>
+      </div>
+      <label class="field" style="margin:12px 0 0"><span>Notiz</span><textarea id="t-note" placeholder="z.B. Wetter, Strecke, Befinden …">${esc(s.note || '')}</textarea></label>
+    </div>
+    <div class="section-title">Aktivitäten</div>
+    <div id="cEntries"></div>
+    <hr class="sep" />
+    ${finished
+      ? `<button class="btn primary block" id="reopenBtn">Als „laufend" markieren</button>`
+      : `<button class="btn good block" id="finishBtn">✓ Training beenden</button>`}
+    <div style="height:20px"></div>
+  `;
+  container.innerHTML = html;
+
+  $('#t-date', container).onchange = e => DB.updateCardioSession(id, { date: e.target.value });
+  $('#t-note', container).oninput = e => DB.updateCardioSession(id, { note: e.target.value });
+
+  renderCardioEntries(container, id);
+
+  const finishBtn = $('#finishBtn', container);
+  if (finishBtn) finishBtn.onclick = async () => {
+    const hasLogged = s.entries.some(DB.isCardioEntryDone);
+    if (!hasLogged) {
+      const action = await emptyCardioFinishModal();
+      if (action === 'discard') { DB.deleteCardioSession(id); toast('Training verworfen'); navigate('/cardio'); return; }
+      if (action !== 'save') return;
+    }
+    DB.updateCardioSession(id, { finishedAt: Date.now() });
+    toast('Kardio-Training gespeichert 🏃');
+    navigate('/cardio');
+  };
+  const reopenBtn = $('#reopenBtn', container);
+  if (reopenBtn) reopenBtn.onclick = () => { DB.updateCardioSession(id, { finishedAt: null }); renderCardioTrain(container, id); };
+}
+
+function renderCardioEntries(container, id) {
+  const s = DB.getCardioSession(id);
+  const wrap = $('#cEntries', container);
+  wrap.innerHTML = '';
+  s.entries.forEach((entry, ei) => {
+    const block = el('div', { class: 'ex-block' });
+    const durationMin = DB.num(entry.durationMin), km = DB.num(entry.km);
+    const pace = (durationMin > 0 && km > 0) ? fmtPace(durationMin / km) : null;
+    const speed = (durationMin > 0 && km > 0) ? (Math.round(km / (durationMin / 60) * 10) / 10) : null;
+    block.innerHTML = `
+      <div class="ex-head">
+        <div class="ex-name">${esc(entry.name)}</div>
+        <button class="btn ghost sm" data-rm="${ei}">🗑️</button>
+      </div>
+      ${entry.equipment ? tagBadgesHTML({ equipment: entry.equipment, muscles: [] }) : ''}
+      ${(entry.targetDurationMin || entry.targetKm) ? `<div class="tiny muted" style="margin:2px 0 8px">Ziel: ${entry.targetDurationMin ? entry.targetDurationMin + ' Min.' : ''}${entry.targetDurationMin && entry.targetKm ? ' · ' : ''}${entry.targetKm ? entry.targetKm + ' km' : ''}</div>` : ''}
+      <div class="row3">
+        <label class="field"><span>Dauer (Min.)</span><input type="number" inputmode="numeric" min="0" value="${entry.durationMin === '' ? '' : esc(entry.durationMin)}" data-f="durationMin" /></label>
+        <label class="field"><span>Distanz (km)</span><input type="number" inputmode="decimal" step="0.01" min="0" value="${entry.km === '' ? '' : esc(entry.km)}" data-f="km" /></label>
+        <label class="field"><span>Herzfrequenz</span><input type="number" inputmode="numeric" min="0" value="${entry.heartRate === '' ? '' : esc(entry.heartRate)}" data-f="heartRate" /></label>
+      </div>
+      <div class="row3">
+        <label class="field"><span>Zone</span><input type="number" inputmode="numeric" min="1" max="5" value="${entry.zone === '' ? '' : esc(entry.zone)}" data-f="zone" /></label>
+        <label class="field"><span>Stufe</span><input type="number" inputmode="numeric" min="0" value="${entry.level === '' ? '' : esc(entry.level)}" data-f="level" /></label>
+        <label class="field"><span>Kalorien</span><input type="number" inputmode="numeric" min="0" value="${entry.calories === '' ? '' : esc(entry.calories)}" data-f="calories" /></label>
+      </div>
+      <div class="row3">
+        <label class="field"><span>Watt</span><input type="number" inputmode="numeric" min="0" value="${entry.watt === '' ? '' : esc(entry.watt)}" data-f="watt" /></label>
+        <label class="field"><span>Höhenmeter</span><input type="number" inputmode="numeric" min="0" value="${entry.elevationM === '' ? '' : esc(entry.elevationM)}" data-f="elevationM" /></label>
+        <div class="field"><span>Pace / km/h</span><div class="tiny muted" style="padding-top:8px">${pace ? pace + ' · ' + speed + ' km/h' : '–'}</div></div>
+      </div>
+    `;
+    wrap.append(block);
+    $$('[data-f]', block).forEach(inp => inp.oninput = () => {
+      entry[inp.dataset.f] = inp.value;
+      DB.save();
+      if (inp.dataset.f === 'durationMin' || inp.dataset.f === 'km') renderCardioEntries(container, id);
+    });
+    $('[data-rm]', block).onclick = async () => {
+      if (await confirmDialog('Aktivität aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
+        s.entries.splice(ei, 1); DB.save(); renderCardioEntries(container, id);
+      }
+    };
+  });
+}
+
+// ---------- Kardio-Statistik je Aktivität ----------
+route('/cardio-stats/:id', ({ id }) => {
+  const act = DB.getCardioActivity(id);
+  if (!act) return navigate('/cardio');
+  setChrome({ title: act.name, back: true, actions: [actionBtn('✏️', () => editCardioActivityModal(id, () => render()))] });
+  const hist = DB.cardioHistory(id);
+  if (!hist.length) {
+    appEl.innerHTML = `<div class="empty"><div class="big">📈</div><div>Noch keine aufgezeichneten Einheiten für „${esc(act.name)}".</div></div>`;
+    return;
+  }
+  const stat = DB.cardioActivityStats(id);
+  const isDistanceBased = hist.some(h => h.km > 0);
+  const isPowerBased = hist.some(h => h.watt > 0);
+  const tiles = `
+    <div class="streak-row">
+      <div class="stat-tile"><div class="v">${stat.sessionsCount}</div><div class="l">Einheiten</div></div>
+      <div class="stat-tile"><div class="v">${stat.longestMin}</div><div class="l">Längste Dauer (Min.)</div></div>
+    </div>
+    ${isDistanceBased ? `<div class="streak-row">
+      <div class="stat-tile"><div class="v">${fmtWeight(stat.maxKm)}</div><div class="l">Max. Distanz (km)</div></div>
+      <div class="stat-tile"><div class="v">${stat.bestPace ? fmtPace(stat.bestPace) : '–'}</div><div class="l">Beste Pace</div></div>
+    </div>` : ''}`;
+
+  const durationChart = lineChart(hist.map(h => ({ y: h.durationMin, label: fmtShort(h.date) })), 'Min.');
+  const paceChart = isDistanceBased ? lineChart(hist.filter(h => h.paceMinPerKm > 0).map(h => ({ y: h.paceMinPerKm, label: fmtShort(h.date) })), 'min/km') : '';
+  const hrChart = hist.some(h => h.heartRate > 0) ? lineChart(hist.filter(h => h.heartRate > 0).map(h => ({ y: h.heartRate, label: fmtShort(h.date) })), 'bpm') : '';
+
+  const rows = hist.slice().reverse().map(h => `<tr>
+    <td>${fmtShort(h.date)}</td>
+    <td class="num">${h.durationMin}</td>
+    <td class="num">${h.km || '–'}</td>
+    <td class="num">${h.paceMinPerKm ? fmtPace(h.paceMinPerKm) : '–'}</td>
+    <td class="num">${h.heartRate || '–'}</td>
+  </tr>`).join('');
+
+  appEl.innerHTML = `
+    ${tiles}
+    <div class="chart-wrap"><div class="c-title"><span>Dauer je Einheit (Min.)</span></div>${durationChart}</div>
+    ${paceChart ? `<div class="chart-wrap"><div class="c-title"><span>Pace je Einheit (min/km, je niedriger desto schneller)</span></div>${paceChart}</div>` : ''}
+    ${hrChart ? `<div class="chart-wrap"><div class="c-title"><span>Herzfrequenz je Einheit</span></div>${hrChart}</div>` : ''}
+    <div class="section-title">Verlauf</div>
+    <div class="card" style="overflow-x:auto;padding:6px 10px">
+      <table class="hist">
+        <thead><tr><th>Datum</th><th>Min.</th><th>km</th><th>Pace</th><th>HF</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p class="tiny muted">Pace/Geschwindigkeit werden aus Dauer und Distanz berechnet. Nur Einträge mit Dauer oder Distanz fließen in die Statistik ein.</p>
+  `;
+});
+
+// ============================================================
 //  Ansicht: Kalender (Habit-Tracker)
 // ============================================================
 let calState = null;
@@ -2203,9 +2900,11 @@ function openTrashModal() {
   let tab = 'ex';
   openModal({
     title: 'Papierkorb',
-    body: `<div class="btn-row" id="trashTabs" style="margin-bottom:10px">
+    body: `<div class="btn-row" id="trashTabs" style="margin-bottom:10px;flex-wrap:wrap">
         <button class="btn sm" data-tab="ex">Übungen</button>
         <button class="btn sm" data-tab="ses">Trainings</button>
+        <button class="btn sm" data-tab="cact">Kardio-Akt.</button>
+        <button class="btn sm" data-tab="cses">Kardio-Trainings</button>
       </div>
       <div id="trashList"></div>`,
     footer: `<button class="btn danger" data-empty>Papierkorb leeren</button><button class="btn ghost" data-x>Schließen</button>`,
@@ -2220,12 +2919,26 @@ function openTrashModal() {
               <button class="btn ghost sm" data-restore="${e.id}" title="Wiederherstellen">↩️</button>
               <button class="btn danger sm" data-purge="${e.id}" title="Endgültig löschen">🗑️</button>
             </div>`).join('') : `<div class="tiny muted center" style="padding:12px">Papierkorb leer.</div>`;
-        } else {
+        } else if (tab === 'ses') {
           const items = DB.trashedSessions();
           listEl.innerHTML = items.length ? items.map(s => `<div class="list-row">
               <div class="grow"><div class="r-title">${esc(s.dayName || 'Training')}</div><div class="r-sub">${fmtDate(s.date)} · gelöscht am ${fmtTs(s.deletedAt)}</div></div>
               <button class="btn ghost sm" data-restoreses="${s.id}" title="Wiederherstellen">↩️</button>
               <button class="btn danger sm" data-purgeses="${s.id}" title="Endgültig löschen">🗑️</button>
+            </div>`).join('') : `<div class="tiny muted center" style="padding:12px">Papierkorb leer.</div>`;
+        } else if (tab === 'cact') {
+          const items = DB.trashedCardioActivities();
+          listEl.innerHTML = items.length ? items.map(a => `<div class="list-row">
+              <div class="grow"><div class="r-title">${esc(a.name)}</div><div class="r-sub">gelöscht am ${fmtTs(a.deletedAt)}</div></div>
+              <button class="btn ghost sm" data-restorecact="${a.id}" title="Wiederherstellen">↩️</button>
+              <button class="btn danger sm" data-purgecact="${a.id}" title="Endgültig löschen">🗑️</button>
+            </div>`).join('') : `<div class="tiny muted center" style="padding:12px">Papierkorb leer.</div>`;
+        } else {
+          const items = DB.trashedCardioSessions();
+          listEl.innerHTML = items.length ? items.map(s => `<div class="list-row">
+              <div class="grow"><div class="r-title">${esc(s.dayName || 'Kardio-Training')}</div><div class="r-sub">${fmtDate(s.date)} · gelöscht am ${fmtTs(s.deletedAt)}</div></div>
+              <button class="btn ghost sm" data-restorecses="${s.id}" title="Wiederherstellen">↩️</button>
+              <button class="btn danger sm" data-purgecses="${s.id}" title="Endgültig löschen">🗑️</button>
             </div>`).join('') : `<div class="tiny muted center" style="padding:12px">Papierkorb leer.</div>`;
         }
         $$('[data-restore]', listEl).forEach(b => b.onclick = () => { DB.restoreExercise(b.dataset.restore); toast('Wiederhergestellt'); draw(); render(); });
@@ -2235,6 +2948,14 @@ function openTrashModal() {
         $$('[data-restoreses]', listEl).forEach(b => b.onclick = () => { DB.restoreSession(b.dataset.restoreses); toast('Wiederhergestellt'); draw(); render(); });
         $$('[data-purgeses]', listEl).forEach(b => b.onclick = async () => {
           if (await confirmDialog('Endgültig löschen?', { danger: true, okText: 'Löschen' })) { DB.purgeTrashedSession(b.dataset.purgeses); draw(); render(); }
+        });
+        $$('[data-restorecact]', listEl).forEach(b => b.onclick = () => { DB.restoreCardioActivity(b.dataset.restorecact); toast('Wiederhergestellt'); draw(); render(); });
+        $$('[data-purgecact]', listEl).forEach(b => b.onclick = async () => {
+          if (await confirmDialog('Endgültig löschen?', { danger: true, okText: 'Löschen' })) { DB.purgeTrashedCardioActivity(b.dataset.purgecact); draw(); render(); }
+        });
+        $$('[data-restorecses]', listEl).forEach(b => b.onclick = () => { DB.restoreCardioSession(b.dataset.restorecses); toast('Wiederhergestellt'); draw(); render(); });
+        $$('[data-purgecses]', listEl).forEach(b => b.onclick = async () => {
+          if (await confirmDialog('Endgültig löschen?', { danger: true, okText: 'Löschen' })) { DB.purgeTrashedCardioSession(b.dataset.purgecses); draw(); render(); }
         });
       }
       $$('[data-tab]', m).forEach(b => b.onclick = () => { tab = b.dataset.tab; draw(); });
@@ -2273,7 +2994,7 @@ route('/settings', () => {
   setChrome({ title: 'Einstellungen', back: false });
   const s = DB.db().settings;
   const stats = { ex: DB.exercises().length, loc: DB.locations().length, plans: DB.db().plans.length, days: DB.db().days.length, ses: DB.sessions().length };
-  const trashCount = DB.trashedExercises().length + DB.trashedSessions().length;
+  const trashCount = DB.trashedExercises().length + DB.trashedSessions().length + DB.trashedCardioActivities().length + DB.trashedCardioSessions().length;
   const activeLoc = DB.getActiveLocation();
 
   appEl.innerHTML = `
@@ -2358,7 +3079,7 @@ route('/settings', () => {
     <div class="card">
       <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Backup</div>
       <p class="tiny muted" style="margin-top:0">Alle Daten liegen <b>lokal auf diesem Gerät</b> (im Browser). Es gibt keinen Server. Erstelle regelmäßig ein Backup!</p>
-      <div class="tiny muted">${stats.loc} Orte · ${stats.plans} Pläne · ${stats.days} Trainingstage · ${stats.ex} Übungen · ${stats.ses} Einheiten</div>
+      <div class="tiny muted">${stats.loc} Orte · ${stats.plans} Pläne · ${stats.days} Trainingstage · ${stats.ex} Übungen · ${stats.ses} Einheiten · ${DB.cardioSessions().length} Kardio-Einheiten</div>
       <label class="field" style="margin:12px 0 0"><span>Backup-Erinnerung</span>
         <select id="s-backupremind">
           <option value="0" ${!s.backupReminderWeeks ? 'selected' : ''}>Aus</option>
@@ -2382,8 +3103,12 @@ route('/settings', () => {
       <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Beispieldaten</div>
       <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
         <input id="s-demo" type="checkbox" ${activeLoc && DB.hasDemoSessions(activeLoc.id) ? 'checked' : ''} style="width:auto" />
-        <span style="margin:0">Beispieldaten (ca. 2 Monate Testtrainings)</span></label>
+        <span style="margin:0">Kraft-Beispieldaten (ca. 2 Monate Testtrainings)</span></label>
       <p class="tiny muted" style="margin:8px 0 0">Erzeugt bzw. entfernt plausible Testeinheiten für <b>${activeLoc ? esc(activeLoc.emoji) + ' ' + esc(activeLoc.name) : 'den aktiven Ort'}</b>, um Statistik &amp; Kalender auszuprobieren. Braucht mindestens einen Trainingstag mit Übungen an diesem Ort.</p>
+      <label class="field" style="margin:12px 0 0;display:flex;align-items:center;gap:10px">
+        <input id="s-cdemo" type="checkbox" ${DB.hasCardioDemoSessions() ? 'checked' : ''} style="width:auto" />
+        <span style="margin:0">Kardio-Beispieldaten (ca. 2 Monate Testtrainings)</span></label>
+      <p class="tiny muted" style="margin:8px 0 0">Erzeugt bzw. entfernt plausible Kardio-Testeinheiten (ortsunabhängig), um die Kardio-Statistik auszuprobieren. Braucht mindestens einen Kardio-Trainingstag mit Aktivitäten.</p>
 
       <hr class="sep" />
       <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Papierkorb</div>
@@ -2395,7 +3120,7 @@ route('/settings', () => {
     <div class="section-title">Gefahrenzone</div>
     <div class="card">
       <button class="btn danger block" id="wipeSessionsBtn">Nur Trainingseinheiten löschen (Pläne bleiben)</button>
-      <p class="tiny muted" style="margin:8px 0 0">Löscht alle aufgezeichneten Trainings (inkl. Papierkorb &amp; Beispieldaten) - Orte, Pläne und Trainingstage bleiben erhalten.</p>
+      <p class="tiny muted" style="margin:8px 0 0">Löscht alle aufgezeichneten Kraft- UND Kardio-Trainings (inkl. Papierkorb &amp; Beispieldaten) - Orte, Pläne, Trainingstage und Kardio-Aktivitäten bleiben erhalten.</p>
       <button class="btn danger block" id="wipeBtn" style="margin-top:14px">Alle Daten löschen</button>
     </div>
     <p class="tiny muted center" style="margin-top:14px">Trainingsplan · lokale PWA · v1</p>
@@ -2483,6 +3208,16 @@ route('/settings', () => {
     } else {
       DB.removeDemoSessions(activeLoc ? activeLoc.id : null);
       toast('Beispieldaten für diesen Ort entfernt');
+    }
+  };
+  $('#s-cdemo', appEl).onchange = e => {
+    if (e.target.checked) {
+      const n = DB.generateCardioDemoSessions();
+      if (!n) { toast('Braucht mind. einen Kardio-Trainingstag mit Aktivitäten'); e.target.checked = false; return; }
+      toast(n + ' Kardio-Beispiel-Trainings erzeugt');
+    } else {
+      DB.removeCardioDemoSessions();
+      toast('Kardio-Beispieldaten entfernt');
     }
   };
 

@@ -1,6 +1,6 @@
-# 🏋️ Trainingsplan – Krafttraining Tracker
+# 🏋️ Trainingsplan – Krafttraining & Kardio Tracker
 
-Eine kleine, **im Browser lauffähige** App zum Aufzeichnen von Krafttraining.
+Eine kleine, **im Browser lauffähige** App zum Aufzeichnen von Kraft- und Kardiotraining.
 Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – installierbar aufs Handy.
 
 ## Funktionen
@@ -29,6 +29,7 @@ Läuft komplett **lokal & offline** (PWA), ohne Server und ohne Login – instal
 - **Papierkorb** – gelöschte Übungen und Trainings landen im Papierkorb (*Einstellungen → Papierkorb*) und lassen sich wiederherstellen oder endgültig entfernen.
 - **Einstellungen** – eigener Reiter unten mit Design (mehrere **Themes**: Dunkel, Hell, OLED Schwarz, Mitternachtsblau, Wald, Kontrast, oder „System"; Akzentfarbe, Schriftgröße, Animationen reduzieren), Trainings-Standardwerten, Backup-Erinnerung und Papierkorb/Gefahrenzone.
 - **Backup** – Export/Import als JSON-Datei.
+- **Kardio** – eigener Reiter unten, **bewusst nicht an einen Ort gebunden** (Laufen/Radfahren findet oft draußen statt, anders als Krafttraining). Struktur analog zum Krafttraining (Kardio-Plan → Trainingstag → Aktivitäten), aber ohne Sätze/Zirkel – eine Aktivität ist eine zusammenhängende Einheit. Gerät frei wählbar und selbst verwaltbar (Laufen draußen, Laufband, Rad-Ergometer, Rudergerät, Crosstrainer, Stairmaster, Schwimmen, …). Erfassbare Werte je Einheit: **Herzfrequenz, Zone, Dauer, Distanz (km), Stufe, Kalorien, Watt, Höhenmeter** – Pace (min/km) und Geschwindigkeit (km/h) werden daraus automatisch berechnet. Alle Felder optional. Der Reiter zeigt Pläne UND Statistik (Trainingsminuten-Trend, meisttrainierte Aktivitäten, Verlaufscharts je Aktivität, letzte Kardio-Trainings) direkt zusammen. Eigene Beispieldaten und ein eigener Papierkorb-Bereich, unabhängig vom Krafttraining. *(Aktuell noch nicht Teil der globalen Suche und der Plan-Änderungsübernahme nach dem Training – kann bei Bedarf ergänzt werden.)*
 
 ## PPL A/B – wissenschaftliche Grundlage
 

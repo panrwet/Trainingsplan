@@ -19,31 +19,86 @@ export const SEED_VERSION = 5;
 const DEFAULT_MUSCLES = ['Brust', 'Rücken', 'Schultern', 'Bizeps', 'Trizeps', 'Unterarme', 'Quadrizeps', 'Beinbeuger', 'Gesäß', 'Waden', 'Bauch', 'Ganzkörper'];
 const DEFAULT_EQUIPMENT = ['Langhantel', 'Kurzhantel', 'Maschine', 'Kabelzug', 'Körpergewicht', 'Kettlebell', 'Sonstiges'];
 
-const DEFAULTS = () => ({
-  version: 1,
-  settings: {
-    // Training
-    defaultRestSec: 90, soundOnRestEnd: true, defaultSets: 3, defaultReps: 10,
-    weekStart: 'mon', askPlanDiff: true, restNotifications: false,
-    // Anzeige/Design
-    tagColors: true, theme: 'dark', accentColor: '#6c8cff', fontSize: 'medium', reducedMotion: false,
-    muscleColor: '#7dd3fc', equipColor: '#86efac', density: 'normal', cornerStyle: 'normal',
-    // Daten
-    backupReminderWeeks: 0, lastBackupAt: null, demoDataEnabled: false,
-    // intern
-    seedVersion: 0,
-  },
-  exercises: [],   // Bibliothek: {id,name,muscles[],equipment,notes,unit,createdAt}
-  muscleGroups: DEFAULT_MUSCLES.map(name => ({ id: uid('mg'), name, createdAt: Date.now() })),   // {id,name,createdAt}
-  equipmentTypes: DEFAULT_EQUIPMENT.map(name => ({ id: uid('eq'), name, createdAt: Date.now() })), // {id,name,createdAt}
-  exerciseNotes: [], // Dauerhafte Geräte-/Einstellungs-Notiz je Übung UND Ort: {id,exerciseId,locationId,text,updatedAt}
-  locations: [],   // Orte:        {id,name,emoji,color,createdAt}
-  plans: [],       // Pläne:       {id,locationId,name,emoji,color,createdAt}
-  days: [],        // Trainingstage:{id,planId,name,emoji,color,order,exercises:[{id,exerciseId,sets,reps,restSec,groupId}],createdAt}
-  sessions: [],    // Einheiten:   {id,locationId,planId,dayId,dayName,date,startedAt,finishedAt,emoji,color,note,entries:[...],planSnapshot:[...]}
-  trashExercises: [], // Papierkorb: gelöschte Übungen, {..exercise, deletedAt}
-  trashSessions: [],  // Papierkorb: gelöschte/verworfene Trainings, {..session, deletedAt}
-});
+// ---------- Kardio: eigener Geräte-Bestand + Startaktivitäten/-plan ----------
+// Kardio ist bewusst NICHT an einen Ort gebunden (anders als Krafttraining) -
+// Laufen/Radfahren findet oft draußen statt, ist also nicht gym-spezifisch.
+// Deshalb können Aktivitäten/Plan hier - anders als bei Übungen/Plänen des
+// Krafttrainings - direkt und ohne SEED_VERSION-Migration in DEFAULTS()
+// vorbefüllt werden: die Felder existieren bei bestehenden Installationen noch
+// gar nicht, db()'s Migrations-Backfill (unten) füllt sie beim nächsten Start
+// einmalig automatisch nach, ohne echte Trainingsdaten anzurühren.
+const DEFAULT_CARDIO_EQUIPMENT = ['Laufen (draußen)', 'Laufband', 'Radfahren (draußen)', 'Fahrrad-Ergometer', 'Rudergerät', 'Crosstrainer', 'Stairmaster', 'Schwimmen', 'Sonstiges'];
+const DEFAULT_CARDIO_ACTIVITIES = [
+  { name: 'Grundlagenausdauer', equipment: 'Laufen (draußen)' },
+  { name: 'Intervalle', equipment: 'Laufen (draußen)' },
+  { name: 'Grundlagenausdauer', equipment: 'Laufband' },
+  { name: 'Intervalle', equipment: 'Laufband' },
+  { name: 'Grundlagenausdauer', equipment: 'Radfahren (draußen)' },
+  { name: 'Grundlagenausdauer', equipment: 'Fahrrad-Ergometer' },
+  { name: 'Intervalle', equipment: 'Fahrrad-Ergometer' },
+  { name: 'Rudern', equipment: 'Rudergerät' },
+  { name: 'Intervalle', equipment: 'Rudergerät' },
+  { name: 'Ausdauereinheit', equipment: 'Crosstrainer' },
+  { name: 'Stufen-Training', equipment: 'Stairmaster' },
+  { name: 'Schwimmtraining', equipment: 'Schwimmen' },
+];
+function buildCardioSeed() {
+  const activities = DEFAULT_CARDIO_ACTIVITIES.map(a => ({ id: uid('cact'), name: a.name, equipment: a.equipment, notes: '', createdAt: Date.now() }));
+  const byNameEquip = (name, equipment) => activities.find(a => a.name === name && a.equipment === equipment);
+  const plan = { id: uid('cplan'), name: 'Ausdauer', emoji: '🏃', color: '#4cc9f0', createdAt: Date.now() };
+  const mkDay = (name, emoji, color, items) => ({
+    id: uid('cday'), planId: plan.id, name, emoji, color, order: 0,
+    activities: items.map(([actName, actEquip, targetDurationMin, targetKm]) => {
+      const act = byNameEquip(actName, actEquip);
+      return { id: uid('cde'), activityId: act ? act.id : null, targetDurationMin, targetKm: targetKm || '' };
+    }),
+    createdAt: Date.now(),
+  });
+  const days = [
+    mkDay('Grundlagenausdauer', '🏃', '#4cc9f0', [['Grundlagenausdauer', 'Laufen (draußen)', 30, 5]]),
+    mkDay('Intervalle', '⚡', '#ff6b6b', [['Intervalle', 'Laufband', 20, '']]),
+    mkDay('Rudern & Rad', '🚣', '#46c98b', [['Rudern', 'Rudergerät', 15, ''], ['Grundlagenausdauer', 'Fahrrad-Ergometer', 20, '']]),
+  ];
+  days.forEach((d, i) => { d.order = i; });
+  return { activities, plan, days };
+}
+
+const DEFAULTS = () => {
+  const cardioSeed = buildCardioSeed();
+  return {
+    version: 1,
+    settings: {
+      // Training
+      defaultRestSec: 90, soundOnRestEnd: true, defaultSets: 3, defaultReps: 10,
+      weekStart: 'mon', askPlanDiff: true, restNotifications: false,
+      // Anzeige/Design
+      tagColors: true, theme: 'dark', accentColor: '#6c8cff', fontSize: 'medium', reducedMotion: false,
+      muscleColor: '#7dd3fc', equipColor: '#86efac', density: 'normal', cornerStyle: 'normal',
+      // Daten
+      backupReminderWeeks: 0, lastBackupAt: null, demoDataEnabled: false,
+      // intern
+      seedVersion: 0,
+    },
+    exercises: [],   // Bibliothek: {id,name,muscles[],equipment,notes,unit,createdAt}
+    muscleGroups: DEFAULT_MUSCLES.map(name => ({ id: uid('mg'), name, createdAt: Date.now() })),   // {id,name,createdAt}
+    equipmentTypes: DEFAULT_EQUIPMENT.map(name => ({ id: uid('eq'), name, createdAt: Date.now() })), // {id,name,createdAt}
+    exerciseNotes: [], // Dauerhafte Geräte-/Einstellungs-Notiz je Übung UND Ort: {id,exerciseId,locationId,text,updatedAt}
+    locations: [],   // Orte:        {id,name,emoji,color,createdAt}
+    plans: [],       // Pläne:       {id,locationId,name,emoji,color,createdAt}
+    days: [],        // Trainingstage:{id,planId,name,emoji,color,order,exercises:[{id,exerciseId,sets,reps,restSec,groupId}],createdAt}
+    sessions: [],    // Einheiten:   {id,locationId,planId,dayId,dayName,date,startedAt,finishedAt,emoji,color,note,entries:[...],planSnapshot:[...]}
+    trashExercises: [], // Papierkorb: gelöschte Übungen, {..exercise, deletedAt}
+    trashSessions: [],  // Papierkorb: gelöschte/verworfene Trainings, {..session, deletedAt}
+    // ---------- Kardio (kein Ort-Bezug, siehe Kommentar oben) ----------
+    cardioEquipment: DEFAULT_CARDIO_EQUIPMENT.map(name => ({ id: uid('ceq'), name, createdAt: Date.now() })),
+    cardioActivities: cardioSeed.activities, // {id,name,equipment,notes,createdAt}
+    cardioPlans: [cardioSeed.plan],          // {id,name,emoji,color,createdAt}
+    cardioDays: cardioSeed.days,              // {id,planId,name,emoji,color,order,activities:[{id,activityId,targetDurationMin,targetKm}]}
+    cardioSessions: [],                       // {id,planId,dayId,dayName,date,startedAt,finishedAt,emoji,color,note,entries:[...]}
+    trashCardioActivities: [],
+    trashCardioSessions: [],
+  };
+};
 
 let store = null;
 
@@ -428,7 +483,10 @@ export function purgeTrashedSession(id) {
   const d = db(); d.trashSessions = d.trashSessions.filter(x => x.id !== id); save();
 }
 export function emptyTrash() {
-  const d = db(); d.trashExercises = []; d.trashSessions = []; save();
+  const d = db();
+  d.trashExercises = []; d.trashSessions = [];
+  d.trashCardioActivities = []; d.trashCardioSessions = [];
+  save();
 }
 
 // ---------- Anpassungen während des Trainings zurück in den Plan übernehmen ----------
@@ -850,12 +908,15 @@ export function hasDemoSessions(locationId = null) {
   return db().sessions.some(s => s.demo && (!locationId || s.locationId === locationId));
 }
 
-// Entfernt NUR die aufgezeichneten Trainingseinheiten (inkl. Papierkorb-Einheiten und
-// Beispieldaten) - Orte/Pläne/Trainingstage/Übungsbibliothek bleiben unangetastet.
+// Entfernt NUR die aufgezeichneten Trainingseinheiten (Kraft UND Kardio, inkl.
+// Papierkorb-Einheiten und Beispieldaten) - Orte/Pläne/Trainingstage/
+// Übungsbibliothek/Kardio-Aktivitäten bleiben unangetastet.
 export function wipeSessions() {
   const d = db();
   d.sessions = [];
   d.trashSessions = [];
+  d.cardioSessions = [];
+  d.trashCardioSessions = [];
   d.settings.demoDataEnabled = false;
   save();
 }
@@ -905,13 +966,15 @@ export function importData(json, mode = 'replace') {
     store.settings = Object.assign(d.settings, incoming.settings || {});
   } else { // merge
     const d = db();
-    ['exercises', 'locations', 'plans', 'days', 'sessions', 'trashExercises', 'trashSessions'].forEach(k => {
+    ['exercises', 'locations', 'plans', 'days', 'sessions', 'trashExercises', 'trashSessions',
+      'cardioActivities', 'cardioPlans', 'cardioDays', 'cardioSessions', 'trashCardioActivities', 'trashCardioSessions'].forEach(k => {
       const existing = new Set(d[k].map(x => x.id));
       (incoming[k] || []).forEach(x => { if (!existing.has(x.id)) d[k].push(x); });
     });
-    // Muskelgruppen/Geräte-Arten nach Name deduplizieren (nicht nach id) - sonst
-    // könnten z.B. zwei "Brust"-Einträge mit unterschiedlicher id entstehen.
-    ['muscleGroups', 'equipmentTypes'].forEach(k => {
+    // Muskelgruppen/Geräte-Arten (Kraft + Kardio) nach Name deduplizieren (nicht
+    // nach id) - sonst könnten z.B. zwei "Brust"-Einträge mit unterschiedlicher
+    // id entstehen.
+    ['muscleGroups', 'equipmentTypes', 'cardioEquipment'].forEach(k => {
       const existingNames = new Set(d[k].map(x => x.name.toLowerCase()));
       (incoming[k] || []).forEach(x => {
         if (x.name && !existingNames.has(x.name.toLowerCase())) { d[k].push(x); existingNames.add(x.name.toLowerCase()); }
@@ -930,6 +993,308 @@ export function importData(json, mode = 'replace') {
 // Setzt alles komplett zurück. seedVersion wird auf den aktuellen Stand gesetzt,
 // damit ein manuelles Löschen wirklich leer bleibt (kein automatisches Reseeden).
 export function wipeAll() { store = DEFAULTS(); store.settings.seedVersion = SEED_VERSION; save(); }
+
+// ============================================================
+//  Kardio-Modul - separates System, KEIN Ort-Bezug (siehe Kommentar bei
+//  DEFAULT_CARDIO_EQUIPMENT oben). Struktur bewusst analog zum Krafttraining
+//  (Plan -> Trainingstag -> Aktivitäten), nur ohne Orts-Ebene und ohne
+//  Sätze/Zirkel - eine Kardio-Aktivität wird als eine zusammenhängende Einheit
+//  erfasst (Herzfrequenz, Zone, Dauer, Distanz, daraus Pace/Pace-Geschwindigkeit,
+//  Stufe, Kalorien, Watt, Höhenmeter - alle optional).
+// ============================================================
+
+// ---------- Kardio-Geräte-Arten ----------
+export function cardioEquipmentTypes() { return db().cardioEquipment.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')); }
+export function getCardioEquipmentType(id) { return db().cardioEquipment.find(e => e.id === id) || null; }
+export function addCardioEquipment(name) {
+  const eq = { id: uid('ceq'), name, createdAt: Date.now() };
+  db().cardioEquipment.push(eq); save(); return eq;
+}
+export function renameCardioEquipment(id, newName) {
+  const d = db();
+  const eq = d.cardioEquipment.find(e => e.id === id); if (!eq) return;
+  const oldName = eq.name; eq.name = newName;
+  d.cardioActivities.forEach(a => { if (a.equipment === oldName) a.equipment = newName; });
+  save();
+}
+export function deleteCardioEquipment(id) {
+  const d = db();
+  const eq = d.cardioEquipment.find(e => e.id === id); if (!eq) return;
+  d.cardioEquipment = d.cardioEquipment.filter(e => e.id !== id);
+  d.cardioActivities.forEach(a => { if (a.equipment === eq.name) a.equipment = ''; });
+  save();
+}
+export function cardioEquipmentUsage(id) {
+  const eq = getCardioEquipmentType(id); if (!eq) return 0;
+  return db().cardioActivities.filter(a => a.equipment === eq.name).length;
+}
+
+// ---------- Kardio-Aktivitäten (analog Übungsbibliothek, ohne Muskelgruppen) ----------
+export function cardioActivities() { return db().cardioActivities.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')); }
+export function getCardioActivity(id) { return db().cardioActivities.find(a => a.id === id) || null; }
+export function addCardioActivity(data) {
+  const a = { id: uid('cact'), name: '', equipment: '', notes: '', createdAt: Date.now(), ...data };
+  db().cardioActivities.push(a); save(); return a;
+}
+export function updateCardioActivity(id, patch) {
+  const a = getCardioActivity(id); if (a) { Object.assign(a, patch); save(); } return a;
+}
+// Analog findDuplicateExercise: Name+Gerät bereits vorhanden? (Notiz zählt nicht mit)
+export function findDuplicateCardioActivity({ name, equipment }, excludeId = null) {
+  const nameNorm = (name || '').trim().toLowerCase();
+  return db().cardioActivities.find(a => a.id !== excludeId && a.name.trim().toLowerCase() === nameNorm && (a.equipment || '') === (equipment || '')) || null;
+}
+export function deleteCardioActivity(id) {
+  const d = db();
+  const a = d.cardioActivities.find(x => x.id === id); if (!a) return;
+  d.cardioActivities = d.cardioActivities.filter(x => x.id !== id);
+  d.cardioDays.forEach(day => { day.activities = day.activities.filter(x => x.activityId !== id); });
+  d.trashCardioActivities.push({ ...a, deletedAt: Date.now() });
+  save();
+}
+export function trashedCardioActivities() { return db().trashCardioActivities.slice().sort((a, b) => b.deletedAt - a.deletedAt); }
+export function restoreCardioActivity(id) {
+  const d = db();
+  const a = d.trashCardioActivities.find(x => x.id === id); if (!a) return null;
+  d.trashCardioActivities = d.trashCardioActivities.filter(x => x.id !== id);
+  const { deletedAt, ...restored } = a;
+  d.cardioActivities.push(restored); save(); return restored;
+}
+export function purgeTrashedCardioActivity(id) {
+  const d = db(); d.trashCardioActivities = d.trashCardioActivities.filter(x => x.id !== id); save();
+}
+export function cardioActivityUsage(id) {
+  return db().cardioSessions.filter(s => (s.entries || []).some(e => e.activityId === id)).length;
+}
+
+// ---------- Kardio-Pläne / -Trainingstage ----------
+export function cardioPlans() { return db().cardioPlans.slice(); }
+export function getCardioPlan(id) { return db().cardioPlans.find(p => p.id === id) || null; }
+export function addCardioPlan(data) {
+  const p = { id: uid('cplan'), name: '', emoji: '🏃', color: '#4cc9f0', createdAt: Date.now(), ...data };
+  db().cardioPlans.push(p); save(); return p;
+}
+export function updateCardioPlan(id, patch) { const p = getCardioPlan(id); if (p) { Object.assign(p, patch); save(); } return p; }
+export function deleteCardioPlan(id) {
+  const d = db();
+  d.cardioDays = d.cardioDays.filter(day => day.planId !== id);
+  d.cardioPlans = d.cardioPlans.filter(p => p.id !== id);
+  save();
+}
+
+export function cardioDaysByPlan(planId) {
+  return db().cardioDays.filter(day => day.planId === planId).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+export function getCardioDay(id) { return db().cardioDays.find(day => day.id === id) || null; }
+export function addCardioDay(data) {
+  const order = cardioDaysByPlan(data.planId).length;
+  const day = { id: uid('cday'), planId: null, name: '', emoji: '🏃', color: '#4cc9f0', order, activities: [], createdAt: Date.now(), ...data };
+  db().cardioDays.push(day); save(); return day;
+}
+export function updateCardioDay(id, patch) { const day = getCardioDay(id); if (day) { Object.assign(day, patch); save(); } return day; }
+export function deleteCardioDay(id) { const d = db(); d.cardioDays = d.cardioDays.filter(day => day.id !== id); save(); }
+export function reorderCardioDays(planId, orderedIds) {
+  orderedIds.forEach((id, i) => { const day = getCardioDay(id); if (day) day.order = i; });
+  save();
+}
+
+export function addActivityToCardioDay(dayId, activityId, opts = {}) {
+  const day = getCardioDay(dayId); if (!day) return;
+  const item = { id: uid('cde'), activityId, targetDurationMin: opts.targetDurationMin ?? '', targetKm: opts.targetKm ?? '' };
+  day.activities.push(item); save(); return item;
+}
+export function updateCardioDayActivity(dayId, itemId, patch) {
+  const day = getCardioDay(dayId); if (!day) return;
+  const it = day.activities.find(x => x.id === itemId); if (it) { Object.assign(it, patch); save(); }
+  return it;
+}
+export function removeCardioDayActivity(dayId, itemId) {
+  const day = getCardioDay(dayId); if (!day) return;
+  day.activities = day.activities.filter(x => x.id !== itemId); save();
+}
+// Einfaches Verschieben (rauf/runter) statt der komplexeren Zirkel-Mehrfachauswahl
+// beim Krafttraining - Kardio-Tage kombinieren i.d.R. nur 1-2 Aktivitäten.
+export function moveCardioDayActivity(dayId, itemId, dir) {
+  const day = getCardioDay(dayId); if (!day) return;
+  const i = day.activities.findIndex(x => x.id === itemId); if (i < 0) return;
+  const j = i + dir; if (j < 0 || j >= day.activities.length) return;
+  [day.activities[i], day.activities[j]] = [day.activities[j], day.activities[i]];
+  save();
+}
+
+// ---------- Kardio-Einheiten (Sessions) ----------
+export function cardioSessions() {
+  return db().cardioSessions.slice().sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+}
+export function getCardioSession(id) { return db().cardioSessions.find(s => s.id === id) || null; }
+export function startCardioSession(dayId) {
+  const day = getCardioDay(dayId); if (!day) return null;
+  const plan = getCardioPlan(day.planId);
+  const entries = day.activities.map(item => {
+    const act = getCardioActivity(item.activityId);
+    return {
+      activityId: item.activityId,
+      name: act ? act.name : '(gelöschte Aktivität)',
+      equipment: act ? act.equipment : '',
+      targetDurationMin: item.targetDurationMin,
+      targetKm: item.targetKm,
+      heartRate: '', zone: '', durationMin: '', km: '', level: '', calories: '', watt: '', elevationM: '',
+    };
+  });
+  const now = Date.now();
+  const s = {
+    id: uid('cses'),
+    planId: plan ? plan.id : null,
+    dayId: day.id,
+    dayName: day.name,
+    date: todayISO(),
+    startedAt: now,
+    finishedAt: null,
+    emoji: day.emoji || plan?.emoji || '🏃',
+    color: day.color || plan?.color || '#4cc9f0',
+    note: '',
+    entries,
+  };
+  db().cardioSessions.push(s); save(); return s;
+}
+export function updateCardioSession(id, patch) { const s = getCardioSession(id); if (s) { Object.assign(s, patch); save(); } return s; }
+export function deleteCardioSession(id) {
+  const d = db();
+  const s = d.cardioSessions.find(x => x.id === id); if (!s) return;
+  d.cardioSessions = d.cardioSessions.filter(x => x.id !== id);
+  d.trashCardioSessions.push({ ...s, deletedAt: Date.now() });
+  save();
+}
+export function trashedCardioSessions() { return db().trashCardioSessions.slice().sort((a, b) => b.deletedAt - a.deletedAt); }
+export function restoreCardioSession(id) {
+  const d = db();
+  const s = d.trashCardioSessions.find(x => x.id === id); if (!s) return null;
+  d.trashCardioSessions = d.trashCardioSessions.filter(x => x.id !== id);
+  const { deletedAt, ...restored } = s;
+  d.cardioSessions.push(restored); save(); return restored;
+}
+export function purgeTrashedCardioSession(id) {
+  const d = db(); d.trashCardioSessions = d.trashCardioSessions.filter(x => x.id !== id); save();
+}
+
+// Ein Eintrag zählt als "erledigt", wenn Dauer oder Distanz eingetragen wurde -
+// Kardio hat kein Abhak-Konzept wie einzelne Kraft-Sätze, sondern wird als eine
+// zusammenhängende Einheit erfasst.
+export function isCardioEntryDone(entry) {
+  return num(entry.durationMin) > 0 || num(entry.km) > 0;
+}
+
+// ---------- Kardio-Statistik ----------
+// Pace (Minuten/km) und Geschwindigkeit (km/h) werden aus Dauer+Distanz berechnet,
+// nicht gespeichert - analog zu e1RM beim Krafttraining (aus Gewicht+Wdh. berechnet).
+export function cardioHistory(activityId, limit = 200) {
+  const rows = [];
+  for (const s of db().cardioSessions) {
+    if (!s.finishedAt) continue;
+    (s.entries || []).filter(e => e.activityId === activityId && isCardioEntryDone(e)).forEach(e => {
+      const durationMin = num(e.durationMin), km = num(e.km);
+      rows.push({
+        sessionId: s.id, date: s.date, startedAt: s.startedAt || 0,
+        heartRate: num(e.heartRate), zone: num(e.zone), durationMin, km,
+        paceMinPerKm: (durationMin > 0 && km > 0) ? durationMin / km : 0,
+        speedKmh: (durationMin > 0 && km > 0) ? km / (durationMin / 60) : 0,
+        level: num(e.level), calories: num(e.calories), watt: num(e.watt), elevationM: num(e.elevationM),
+      });
+    });
+  }
+  rows.sort((a, b) => a.startedAt - b.startedAt);
+  return rows.slice(-limit);
+}
+export function cardioActivityStats(activityId) {
+  const hist = cardioHistory(activityId);
+  const stat = { sessionsCount: hist.length, maxKm: 0, longestMin: 0, bestPace: 0, maxWatt: 0 };
+  hist.forEach(r => {
+    if (r.km > stat.maxKm) stat.maxKm = r.km;
+    if (r.durationMin > stat.longestMin) stat.longestMin = r.durationMin;
+    if (r.paceMinPerKm > 0 && (stat.bestPace === 0 || r.paceMinPerKm < stat.bestPace)) stat.bestPace = r.paceMinPerKm;
+    if (r.watt > stat.maxWatt) stat.maxWatt = r.watt;
+  });
+  return stat;
+}
+export function cardioSessionCountInPeriod(periodDays = null) {
+  const cutoff = periodCutoff(periodDays);
+  return db().cardioSessions.filter(s => s.finishedAt && s.finishedAt >= cutoff).length;
+}
+export function weeklyCardioMinutesTrend(weeks = 10) {
+  const now = Date.now();
+  const buckets = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const start = now - (i + 1) * 7 * 86400000;
+    const end = now - i * 7 * 86400000;
+    let minutes = 0;
+    for (const s of db().cardioSessions) {
+      if (!s.finishedAt || s.finishedAt < start || s.finishedAt >= end) continue;
+      (s.entries || []).forEach(e => { if (isCardioEntryDone(e)) minutes += num(e.durationMin); });
+    }
+    buckets.push({ weekEndTs: end, minutes: Math.round(minutes) });
+  }
+  return buckets;
+}
+export function topCardioActivitiesByFrequency(periodDays = null, limit = 5) {
+  const cutoff = periodCutoff(periodDays);
+  const counts = new Map();
+  for (const s of db().cardioSessions) {
+    if (!s.finishedAt || s.finishedAt < cutoff) continue;
+    (s.entries || []).forEach(e => { if (isCardioEntryDone(e)) counts.set(e.activityId, (counts.get(e.activityId) || 0) + 1); });
+  }
+  return Array.from(counts.entries())
+    .map(([activityId, count]) => ({ activityId, name: (getCardioActivity(activityId) || {}).name || '(gelöscht)', count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
+// ---------- Kardio-Beispieldaten (analog generateDemoSessions, ortsunabhängig) ----------
+export function generateCardioDemoSessions() {
+  const days = cardioPlans().flatMap(p => cardioDaysByPlan(p.id)).filter(d => d.activities.length);
+  if (!days.length) return 0;
+  const now = Date.now();
+  const totalDays = 60;
+  let dayIdx = 0, count = 0;
+  for (let daysAgo = totalDays; daysAgo >= 0; daysAgo -= 3) {
+    if (Math.random() < 0.15) continue; // vereinzelt ausgelassene Einheiten
+    const day = days[dayIdx % days.length];
+    dayIdx++;
+    const ts = now - daysAgo * 86400000;
+    const d = new Date(ts);
+    const dateISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const progress = (totalDays - daysAgo) / totalDays;
+    const entries = day.activities.map(item => {
+      const act = getCardioActivity(item.activityId);
+      const equip = act ? act.equipment : '';
+      const targetMin = num(item.targetDurationMin) || 25;
+      const durationMin = Math.max(5, Math.round(targetMin * (1 + progress * 0.1) + (Math.random() * 6 - 3)));
+      const isDistanceBased = /Laufen|Laufband|Rad/.test(equip);
+      const km = isDistanceBased ? Math.round(durationMin / (6.2 - progress * 0.8) * 10) / 10 : '';
+      const isPowerBased = /Ergometer|Rudergerät/.test(equip);
+      return {
+        activityId: item.activityId, name: act ? act.name : 'Aktivität', equipment: equip,
+        targetDurationMin: item.targetDurationMin, targetKm: item.targetKm,
+        heartRate: 118 + Math.round(Math.random() * 42), zone: 2 + Math.round(Math.random() * 2),
+        durationMin, km,
+        level: equip === 'Fahrrad-Ergometer' ? 8 + Math.round(Math.random() * 6) : '',
+        calories: Math.round(durationMin * 9), watt: isPowerBased ? 100 + Math.round(Math.random() * 80) : '',
+        elevationM: '',
+      };
+    });
+    db().cardioSessions.push({
+      id: uid('cses'), planId: day.planId, dayId: day.id, dayName: day.name,
+      date: dateISO, startedAt: ts, finishedAt: ts + ((entries[0]?.durationMin || 30) + 5) * 60000,
+      emoji: day.emoji, color: day.color, note: '', entries, demo: true,
+    });
+    count++;
+  }
+  save();
+  return count;
+}
+export function removeCardioDemoSessions() {
+  const d = db(); d.cardioSessions = d.cardioSessions.filter(s => !s.demo); save();
+}
+export function hasCardioDemoSessions() { return db().cardioSessions.some(s => s.demo); }
 
 // ---------- Datum ----------
 export function todayISO() {

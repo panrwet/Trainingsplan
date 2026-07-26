@@ -1,5 +1,5 @@
 // Service Worker – Offline-Fähigkeit für die Trainings-PWA
-const CACHE = 'trainingsplan-v4';
+const CACHE = 'trainingsplan-v5';
 const ASSETS = [
   './',
   './index.html',
