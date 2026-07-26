@@ -2307,15 +2307,47 @@ route('/cardio-log/:dayId', ({ dayId }) => {
     const redrawBlock = () => { block.innerHTML = cardioEntryFieldsHTML(entry); wireCardioEntryFields(block, entry, f => { if (f === 'durationMin' || f === 'km') redrawBlock(); }); };
     redrawBlock();
   });
-  $('#saveBtn', appEl).onclick = () => {
+  $('#saveBtn', appEl).onclick = async () => {
     const hasAny = draft.entries.some(DB.isCardioEntryDone);
     if (!hasAny) return toast('Bitte mindestens einen Wert (Dauer oder Distanz) eintragen');
     DB.logCardioSession(dayId, { date: draft.date, note: draft.note, entries: draft.entries });
+    if (DB.db().settings.askPlanDiff) {
+      const diffs = DB.computeCardioDayDiff(dayId, draft.entries);
+      if (diffs.length) await cardioDayDiffModal(dayId, diffs);
+    }
     cardioLogDraft = null;
     toast('Kardio-Training gespeichert 🏃');
     navigate('/cardio');
   };
 });
+
+// Nach dem Eintragen: weicht Dauer/Distanz vom gespeicherten Ziel des
+// Trainingstags ab, einzeln auswählbar ins Ziel übernehmen lassen (analog
+// planDiffModal beim Krafttraining, nur ohne Struktur-Änderungen).
+function cardioDayDiffModal(dayId, diffs) {
+  return new Promise(resolve => {
+    const rows = diffs.map((d, i) => {
+      const label = `🎯 Ziel bei <b>${esc(d.equipment)}</b>: ${d.oldVal || '–'} ${d.unit} → ${d.newVal} ${d.unit}`;
+      return `<label class="diff-row"><input type="checkbox" data-diff="${i}" checked /><span>${label}</span></label>`;
+    }).join('');
+    openModal({
+      title: 'Ziel übernehmen?',
+      body: `<p class="tiny muted" style="margin-top:0">Deine eingetragenen Werte weichen vom gespeicherten Ziel dieses Trainingstags ab. Ziel entsprechend aktualisieren?</p>
+        <div class="diff-list">${rows}</div>`,
+      footer: `<button class="btn ghost" data-skip>Nur diesmal</button><button class="btn primary" data-apply>Übernehmen</button>`,
+      onDismiss: () => resolve(),
+      onMount: (m, c) => {
+        $('[data-skip]', m).onclick = () => { c(); resolve(); };
+        $('[data-apply]', m).onclick = () => {
+          const selected = [];
+          $$('[data-diff]', m).forEach(cb => { if (cb.checked) selected.push(diffs[parseInt(cb.dataset.diff)]); });
+          if (selected.length) DB.applyCardioDayDiffs(dayId, selected);
+          c(); resolve();
+        };
+      },
+    });
+  });
+}
 
 // ---------- Bestehende Kardio-Einheit ansehen/bearbeiten ----------
 route('/cardio-session/:id', ({ id }) => {
@@ -2353,9 +2385,30 @@ function discardCardioSession(id) {
 }
 
 // ---------- Kardio-Statistik: je Gerät / je Trainingstag / je Plan ----------
-function cardioStatsPageHTML(hist, stat) {
-  if (!hist.length) return `<div class="empty"><div class="big">📈</div><div>Noch keine aufgezeichneten Einheiten.</div></div>`;
+// Alle Kennzahlen, die eine Kardio-Einheit haben kann - für die Statistik per
+// Dropdown auswählbar statt fest gestapelter Charts (bei bis zu 8 möglichen
+// Kennzahlen sonst zu unübersichtlich/lang). shortLabel für die Tabellen-
+// Kopfzeile, cell() formatiert den Tabellenwert (z.B. Pace als "5:30/km").
+const CARDIO_METRICS = [
+  { key: 'durationMin', label: 'Dauer (Min.)', shortLabel: 'Min.', unit: 'Min.', cell: h => h.durationMin || '–' },
+  { key: 'km', label: 'Distanz (km)', shortLabel: 'km', unit: 'km', cell: h => h.km || '–' },
+  { key: 'paceMinPerKm', label: 'Pace (min/km)', shortLabel: 'Pace', unit: 'min/km', cell: h => h.paceMinPerKm ? fmtPace(h.paceMinPerKm) : '–' },
+  { key: 'heartRate', label: 'Herzfrequenz (bpm)', shortLabel: 'HF', unit: 'bpm', cell: h => h.heartRate || '–' },
+  { key: 'calories', label: 'Kalorien (kcal)', shortLabel: 'Kal.', unit: 'kcal', cell: h => h.calories || '–' },
+  { key: 'watt', label: 'Watt', shortLabel: 'Watt', unit: 'W', cell: h => h.watt || '–' },
+  { key: 'level', label: 'Stufe', shortLabel: 'Stufe', unit: '', cell: h => h.level || '–' },
+  { key: 'elevationM', label: 'Höhenmeter', shortLabel: 'Hm', unit: 'hm', cell: h => h.elevationM || '–' },
+];
+
+// Setzt appEl.innerHTML für eine Kardio-Statistikseite (je Gerät/Tag/Plan) und
+// verdrahtet das Kennzahl-Dropdown - gemeinsam genutzt von allen drei
+// /cardio-stats*-Routen.
+function renderCardioStatsPage(hist, stat) {
+  if (!hist.length) { appEl.innerHTML = `<div class="empty"><div class="big">📈</div><div>Noch keine aufgezeichneten Einheiten.</div></div>`; return; }
   const isDistanceBased = hist.some(h => h.km > 0);
+  const metrics = CARDIO_METRICS.filter(m => hist.some(h => DB.num(h[m.key]) > 0));
+  if (!metrics.length) metrics.push(CARDIO_METRICS[0]);
+
   const tiles = `
     <div class="streak-row">
       <div class="stat-tile"><div class="v">${stat.sessionsCount}</div><div class="l">Einheiten</div></div>
@@ -2365,38 +2418,44 @@ function cardioStatsPageHTML(hist, stat) {
       <div class="stat-tile"><div class="v">${fmtWeight(stat.maxKm)}</div><div class="l">Max. Distanz (km)</div></div>
       <div class="stat-tile"><div class="v">${stat.bestPace ? fmtPace(stat.bestPace) : '–'}</div><div class="l">Beste Pace</div></div>
     </div>` : ''}`;
-  const durationChart = lineChart(hist.map(h => ({ y: h.durationMin, label: fmtShort(h.date) })), 'Min.');
-  const paceChart = isDistanceBased ? lineChart(hist.filter(h => h.paceMinPerKm > 0).map(h => ({ y: h.paceMinPerKm, label: fmtShort(h.date) })), 'min/km') : '';
-  const hrChart = hist.some(h => h.heartRate > 0) ? lineChart(hist.filter(h => h.heartRate > 0).map(h => ({ y: h.heartRate, label: fmtShort(h.date) })), 'bpm') : '';
+
   const rows = hist.slice().reverse().map(h => `<tr>
     <td>${fmtShort(h.date)}</td>
-    <td class="num">${h.durationMin}</td>
-    <td class="num">${h.km || '–'}</td>
-    <td class="num">${h.paceMinPerKm ? fmtPace(h.paceMinPerKm) : '–'}</td>
-    <td class="num">${h.heartRate || '–'}</td>
+    ${metrics.map(m => `<td class="num">${m.cell(h)}</td>`).join('')}
   </tr>`).join('');
-  return `
+
+  appEl.innerHTML = `
     ${tiles}
-    <div class="chart-wrap"><div class="c-title"><span>Dauer je Einheit (Min.)</span></div>${durationChart}</div>
-    ${paceChart ? `<div class="chart-wrap"><div class="c-title"><span>Pace je Einheit (min/km, je niedriger desto schneller)</span></div>${paceChart}</div>` : ''}
-    ${hrChart ? `<div class="chart-wrap"><div class="c-title"><span>Herzfrequenz je Einheit</span></div>${hrChart}</div>` : ''}
+    <div class="card">
+      <label class="field" style="margin:0"><span>Kennzahl</span>
+        <select id="metricSelect">${metrics.map(m => `<option value="${m.key}">${esc(m.label)}</option>`).join('')}</select>
+      </label>
+      <div id="metricChartWrap" class="chart-wrap" style="margin-top:10px"><div class="c-title"><span id="metricTitle"></span></div><div id="metricChart"></div></div>
+    </div>
     <div class="section-title">Verlauf</div>
     <div class="card" style="overflow-x:auto;padding:6px 10px">
       <table class="hist">
-        <thead><tr><th>Datum</th><th>Min.</th><th>km</th><th>Pace</th><th>HF</th></tr></thead>
+        <thead><tr><th>Datum</th>${metrics.map(m => `<th>${esc(m.shortLabel)}</th>`).join('')}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
     <p class="tiny muted">Pace/Geschwindigkeit werden aus Dauer und Distanz berechnet. Nur Einträge mit Dauer oder Distanz fließen in die Statistik ein.</p>
   `;
+
+  const drawMetricChart = (key) => {
+    const m = metrics.find(x => x.key === key) || metrics[0];
+    $('#metricTitle', appEl).textContent = m.label + ' je Einheit';
+    $('#metricChart', appEl).innerHTML = lineChart(hist.map(h => ({ y: DB.num(h[m.key]), label: fmtShort(h.date) })), m.unit);
+  };
+  drawMetricChart(metrics[0].key);
+  $('#metricSelect', appEl).onchange = e => drawMetricChart(e.target.value);
 }
 
 route('/cardio-stats/:equipment', ({ equipment }) => {
-  const eq = DB.cardioEquipmentTypes().find(e => e.name === equipment);
   setChrome({ title: equipment, back: true });
   const hist = DB.cardioHistoryByEquipment(equipment);
   const stat = DB.cardioEquipmentStats(equipment);
-  appEl.innerHTML = cardioStatsPageHTML(hist, stat);
+  renderCardioStatsPage(hist, stat);
 });
 
 route('/cardio-stats-day/:dayId', ({ dayId }) => {
@@ -2405,7 +2464,7 @@ route('/cardio-stats-day/:dayId', ({ dayId }) => {
   setChrome({ title: `${day.emoji} ${day.name}`, back: true });
   const hist = DB.cardioHistoryByDay(dayId);
   const stat = DB.cardioDayStats(dayId);
-  appEl.innerHTML = cardioStatsPageHTML(hist, stat);
+  renderCardioStatsPage(hist, stat);
 });
 
 route('/cardio-stats-plan/:planId', ({ planId }) => {
@@ -2414,7 +2473,7 @@ route('/cardio-stats-plan/:planId', ({ planId }) => {
   setChrome({ title: `${plan.emoji} ${plan.name}`, back: true });
   const hist = DB.cardioHistoryByPlan(planId);
   const stat = DB.cardioPlanStats(planId);
-  appEl.innerHTML = cardioStatsPageHTML(hist, stat);
+  renderCardioStatsPage(hist, stat);
 });
 
 // ============================================================

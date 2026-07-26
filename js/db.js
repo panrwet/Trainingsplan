@@ -1143,6 +1143,32 @@ export function isCardioEntryDone(entry) {
   return num(entry.durationMin) > 0 || num(entry.km) > 0;
 }
 
+// Vergleicht die tatsächlich eingetragenen Werte einer NEUEN Kardio-Einheit mit
+// den gespeicherten Zielwerten des Trainingstags - analog zu
+// computeSessionPlanDiff beim Krafttraining, aber einfacher (nur Ziel-Dauer/
+// -Distanz je Gerät, da das Eintragsformular keine Struktur wie Zirkel/
+// Reihenfolge kennt). entries entspricht 1:1 (per Index) day.activities, da es
+// aus cardioEntryTemplate() erzeugt wurde.
+export function computeCardioDayDiff(dayId, entries) {
+  const day = getCardioDay(dayId); if (!day) return [];
+  const diffs = [];
+  entries.forEach((entry, i) => {
+    const item = day.activities[i]; if (!item || !isCardioEntryDone(entry)) return;
+    const durationMin = num(entry.durationMin);
+    if (durationMin > 0 && durationMin !== num(item.targetDurationMin)) {
+      diffs.push({ itemId: item.id, equipment: item.equipment, field: 'targetDurationMin', oldVal: num(item.targetDurationMin), newVal: durationMin, unit: 'Min.' });
+    }
+    const km = num(entry.km);
+    if (km > 0 && km !== num(item.targetKm)) {
+      diffs.push({ itemId: item.id, equipment: item.equipment, field: 'targetKm', oldVal: num(item.targetKm), newVal: km, unit: 'km' });
+    }
+  });
+  return diffs;
+}
+export function applyCardioDayDiffs(dayId, diffs) {
+  diffs.forEach(d => updateCardioDayActivity(dayId, d.itemId, { [d.field]: d.newVal }));
+}
+
 // ---------- Kardio-Statistik ----------
 // Pace (Minuten/km) und Geschwindigkeit (km/h) werden aus Dauer+Distanz berechnet,
 // nicht gespeichert - analog zu e1RM beim Krafttraining (aus Gewicht+Wdh. berechnet).
