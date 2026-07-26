@@ -33,15 +33,15 @@ const DEFAULT_EQUIPMENT = ['Langhantel', 'Kurzhantel', 'Maschine', 'Kabelzug', '
 const DEFAULT_CARDIO_EQUIPMENT = ['Laufen (draußen)', 'Laufband', 'Radfahren (draußen)', 'Fahrrad-Ergometer', 'Rudergerät', 'Crosstrainer', 'Stairmaster', 'Schwimmen', 'Sonstiges'];
 function buildCardioSeed() {
   const plan = { id: uid('cplan'), name: 'Ausdauer', emoji: '🏃', color: '#4cc9f0', createdAt: Date.now() };
-  const mkDay = (name, emoji, color, items) => ({
+  const mkDay = (name, emoji, color, equipmentList) => ({
     id: uid('cday'), planId: plan.id, name, emoji, color, order: 0,
-    activities: items.map(([equipment, targetDurationMin, targetKm]) => ({ id: uid('cde'), equipment, targetDurationMin, targetKm: targetKm || '' })),
+    activities: equipmentList.map(equipment => ({ id: uid('cde'), equipment })),
     createdAt: Date.now(),
   });
   const days = [
-    mkDay('Grundlagenausdauer', '🏃', '#4cc9f0', [['Laufen (draußen)', 30, 5]]),
-    mkDay('Intervalle', '⚡', '#ff6b6b', [['Laufband', 20, '']]),
-    mkDay('Rudern & Rad', '🚣', '#46c98b', [['Rudergerät', 15, ''], ['Fahrrad-Ergometer', 20, '']]),
+    mkDay('Grundlagenausdauer', '🏃', '#4cc9f0', ['Laufen (draußen)']),
+    mkDay('Intervalle', '⚡', '#ff6b6b', ['Laufband']),
+    mkDay('Rudern & Rad', '🚣', '#46c98b', ['Rudergerät', 'Fahrrad-Ergometer']),
   ];
   days.forEach((d, i) => { d.order = i; });
   return { plan, days };
@@ -76,7 +76,7 @@ const DEFAULTS = () => {
     // ---------- Kardio (kein Ort-Bezug, siehe Kommentar oben) ----------
     cardioEquipment: DEFAULT_CARDIO_EQUIPMENT.map(name => ({ id: uid('ceq'), name, createdAt: Date.now() })),
     cardioPlans: [cardioSeed.plan],           // {id,name,emoji,color,createdAt}
-    cardioDays: cardioSeed.days,              // {id,planId,name,emoji,color,order,activities:[{id,equipment,targetDurationMin,targetKm}]}
+    cardioDays: cardioSeed.days,              // {id,planId,name,emoji,color,order,activities:[{id,equipment}]}
     cardioSessions: [],                       // {id,planId,dayId,dayName,date,startedAt,finishedAt,emoji,color,note,entries:[...]} - immer direkt komplett angelegt, kein "laufendes Training"
     trashCardioSessions: [],
   };
@@ -1052,15 +1052,10 @@ export function reorderCardioDays(planId, orderedIds) {
 
 // item.equipment ist der Gerätename (Klartext-String, wie equipment bei
 // Kraftübungen) - kein id-Zwischenschritt nötig, da Aktivität = Gerät.
-export function addEquipmentToCardioDay(dayId, equipment, opts = {}) {
+export function addEquipmentToCardioDay(dayId, equipment) {
   const day = getCardioDay(dayId); if (!day) return;
-  const item = { id: uid('cde'), equipment, targetDurationMin: opts.targetDurationMin ?? '', targetKm: opts.targetKm ?? '' };
+  const item = { id: uid('cde'), equipment };
   day.activities.push(item); save(); return item;
-}
-export function updateCardioDayActivity(dayId, itemId, patch) {
-  const day = getCardioDay(dayId); if (!day) return;
-  const it = day.activities.find(x => x.id === itemId); if (it) { Object.assign(it, patch); save(); }
-  return it;
 }
 export function removeCardioDayActivity(dayId, itemId) {
   const day = getCardioDay(dayId); if (!day) return;
@@ -1091,7 +1086,7 @@ export function getCardioSession(id) { return db().cardioSessions.find(s => s.id
 export function cardioEntryTemplate(dayId) {
   const day = getCardioDay(dayId); if (!day) return null;
   return day.activities.map(item => ({
-    equipment: item.equipment, targetDurationMin: item.targetDurationMin, targetKm: item.targetKm,
+    equipment: item.equipment,
     heartRate: '', zone: '', durationMin: '', km: '', level: '', calories: '', watt: '', elevationM: '',
   }));
 }
@@ -1141,32 +1136,6 @@ export function purgeTrashedCardioSession(id) {
 // zusammenhängende Einheit erfasst.
 export function isCardioEntryDone(entry) {
   return num(entry.durationMin) > 0 || num(entry.km) > 0;
-}
-
-// Vergleicht die tatsächlich eingetragenen Werte einer NEUEN Kardio-Einheit mit
-// den gespeicherten Zielwerten des Trainingstags - analog zu
-// computeSessionPlanDiff beim Krafttraining, aber einfacher (nur Ziel-Dauer/
-// -Distanz je Gerät, da das Eintragsformular keine Struktur wie Zirkel/
-// Reihenfolge kennt). entries entspricht 1:1 (per Index) day.activities, da es
-// aus cardioEntryTemplate() erzeugt wurde.
-export function computeCardioDayDiff(dayId, entries) {
-  const day = getCardioDay(dayId); if (!day) return [];
-  const diffs = [];
-  entries.forEach((entry, i) => {
-    const item = day.activities[i]; if (!item || !isCardioEntryDone(entry)) return;
-    const durationMin = num(entry.durationMin);
-    if (durationMin > 0 && durationMin !== num(item.targetDurationMin)) {
-      diffs.push({ itemId: item.id, equipment: item.equipment, field: 'targetDurationMin', oldVal: num(item.targetDurationMin), newVal: durationMin, unit: 'Min.' });
-    }
-    const km = num(entry.km);
-    if (km > 0 && km !== num(item.targetKm)) {
-      diffs.push({ itemId: item.id, equipment: item.equipment, field: 'targetKm', oldVal: num(item.targetKm), newVal: km, unit: 'km' });
-    }
-  });
-  return diffs;
-}
-export function applyCardioDayDiffs(dayId, diffs) {
-  diffs.forEach(d => updateCardioDayActivity(dayId, d.itemId, { [d.field]: d.newVal }));
 }
 
 // ---------- Kardio-Statistik ----------
@@ -1270,13 +1239,12 @@ export function generateCardioDemoSessions() {
     const progress = (totalDays - daysAgo) / totalDays;
     const entries = day.activities.map(item => {
       const equip = item.equipment;
-      const targetMin = num(item.targetDurationMin) || 25;
-      const durationMin = Math.max(5, Math.round(targetMin * (1 + progress * 0.1) + (Math.random() * 6 - 3)));
+      const durationMin = Math.max(5, Math.round(25 * (1 + progress * 0.1) + (Math.random() * 6 - 3)));
       const isDistanceBased = /Laufen|Laufband|Rad/.test(equip);
       const km = isDistanceBased ? Math.round(durationMin / (6.2 - progress * 0.8) * 10) / 10 : '';
       const isPowerBased = /Ergometer|Rudergerät/.test(equip);
       return {
-        equipment: equip, targetDurationMin: item.targetDurationMin, targetKm: item.targetKm,
+        equipment: equip,
         heartRate: 118 + Math.round(Math.random() * 42), zone: 2 + Math.round(Math.random() * 2),
         durationMin, km,
         level: equip === 'Fahrrad-Ergometer' ? 8 + Math.round(Math.random() * 6) : '',

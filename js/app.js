@@ -2092,11 +2092,9 @@ route('/cardio-day/:id', ({ id }) => {
           <div style="display:flex;align-items:center;gap:8px">
             <div class="grow">
               <b>${esc(item.equipment || '(kein Gerät)')}</b>
-              <div class="tiny muted" style="margin-top:4px">${item.targetDurationMin ? item.targetDurationMin + ' Min.' : ''}${item.targetDurationMin && item.targetKm ? ' · ' : ''}${item.targetKm ? item.targetKm + ' km' : ''}${!item.targetDurationMin && !item.targetKm ? 'Kein Ziel gesetzt' : ''}</div>
             </div>
             <span class="mv" data-up="${item.id}" style="padding:4px 8px;color:${idx === 0 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${idx === 0 ? 'none' : 'auto'}">▲</span>
             <span class="mv" data-down="${item.id}" style="padding:4px 8px;color:${idx === day.activities.length - 1 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${idx === day.activities.length - 1 ? 'none' : 'auto'}">▼</span>
-            <button class="btn ghost sm" data-edit="${item.id}">✏️</button>
             <button class="btn ghost sm" data-rm="${item.id}">🗑️</button>
           </div>
         </div>`;
@@ -2106,33 +2104,12 @@ route('/cardio-day/:id', ({ id }) => {
     $('#logBtn', appEl).onclick = () => { if (!day.activities.length) return toast('Erst Geräte hinzufügen'); navigate('/cardio-log/' + id); };
     $$('[data-up]', appEl).forEach(n => n.onclick = () => { DB.moveCardioDayActivity(id, n.dataset.up, -1); draw(); });
     $$('[data-down]', appEl).forEach(n => n.onclick = () => { DB.moveCardioDayActivity(id, n.dataset.down, 1); draw(); });
-    $$('[data-edit]', appEl).forEach(n => n.onclick = () => editCardioDayActivityModal(id, n.dataset.edit, draw));
     $$('[data-rm]', appEl).forEach(n => n.onclick = async () => {
       if (await confirmDialog('Gerät aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) { DB.removeCardioDayActivity(id, n.dataset.rm); draw(); }
     });
   }
   draw();
 });
-
-function editCardioDayActivityModal(dayId, itemId, onSaved) {
-  const item = DB.getCardioDay(dayId).activities.find(x => x.id === itemId);
-  openModal({
-    title: 'Ziel anpassen',
-    body: `
-      <div class="row3">
-        <label class="field"><span>Ziel-Dauer (Min.)</span><input id="f-min" type="number" inputmode="numeric" min="0" value="${esc(item.targetDurationMin ?? '')}" /></label>
-        <label class="field"><span>Ziel-Distanz (km)</span><input id="f-km" type="number" inputmode="decimal" step="0.1" min="0" value="${esc(item.targetKm ?? '')}" /></label>
-      </div>`,
-    footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
-    onMount: (m, close) => {
-      $('[data-x]', m).onclick = close;
-      $('[data-ok]', m).onclick = () => {
-        DB.updateCardioDayActivity(dayId, itemId, { targetDurationMin: $('#f-min', m).value, targetKm: $('#f-km', m).value });
-        close(); if (onSaved) onSaved();
-      };
-    },
-  });
-}
 
 // ---------- Kardio-Geräte-Auswahl (zum Hinzufügen zu einem Trainingstag) ----------
 function pickCardioEquipmentModal(onPick) {
@@ -2249,7 +2226,6 @@ function cardioPaceText(entry) {
 function cardioEntryFieldsHTML(entry) {
   return `
     <div class="ex-head"><div class="ex-name">${esc(entry.equipment || '(kein Gerät)')}</div></div>
-    ${(entry.targetDurationMin || entry.targetKm) ? `<div class="tiny muted" style="margin:2px 0 8px">Ziel: ${entry.targetDurationMin ? entry.targetDurationMin + ' Min.' : ''}${entry.targetDurationMin && entry.targetKm ? ' · ' : ''}${entry.targetKm ? entry.targetKm + ' km' : ''}</div>` : ''}
     <div class="row3">
       <label class="field"><span>Dauer (Min.)</span><input type="number" inputmode="numeric" min="0" value="${entry.durationMin === '' ? '' : esc(entry.durationMin)}" data-f="durationMin" /></label>
       <label class="field"><span>Distanz (km)</span><input type="number" inputmode="decimal" step="0.01" min="0" value="${entry.km === '' ? '' : esc(entry.km)}" data-f="km" /></label>
@@ -2311,47 +2287,15 @@ route('/cardio-log/:dayId', ({ dayId }) => {
     block.innerHTML = cardioEntryFieldsHTML(entry);
     wireCardioEntryFields(block, entry, () => {});
   });
-  $('#saveBtn', appEl).onclick = async () => {
+  $('#saveBtn', appEl).onclick = () => {
     const hasAny = draft.entries.some(DB.isCardioEntryDone);
     if (!hasAny) return toast('Bitte mindestens einen Wert (Dauer oder Distanz) eintragen');
     DB.logCardioSession(dayId, { date: draft.date, note: draft.note, entries: draft.entries });
-    if (DB.db().settings.askPlanDiff) {
-      const diffs = DB.computeCardioDayDiff(dayId, draft.entries);
-      if (diffs.length) await cardioDayDiffModal(dayId, diffs);
-    }
     cardioLogDraft = null;
     toast('Kardio-Training gespeichert 🏃');
     navigate('/cardio');
   };
 });
-
-// Nach dem Eintragen: weicht Dauer/Distanz vom gespeicherten Ziel des
-// Trainingstags ab, einzeln auswählbar ins Ziel übernehmen lassen (analog
-// planDiffModal beim Krafttraining, nur ohne Struktur-Änderungen).
-function cardioDayDiffModal(dayId, diffs) {
-  return new Promise(resolve => {
-    const rows = diffs.map((d, i) => {
-      const label = `🎯 Ziel bei <b>${esc(d.equipment)}</b>: ${d.oldVal || '–'} ${d.unit} → ${d.newVal} ${d.unit}`;
-      return `<label class="diff-row"><input type="checkbox" data-diff="${i}" checked /><span>${label}</span></label>`;
-    }).join('');
-    openModal({
-      title: 'Ziel übernehmen?',
-      body: `<p class="tiny muted" style="margin-top:0">Deine eingetragenen Werte weichen vom gespeicherten Ziel dieses Trainingstags ab. Ziel entsprechend aktualisieren?</p>
-        <div class="diff-list">${rows}</div>`,
-      footer: `<button class="btn ghost" data-skip>Nur diesmal</button><button class="btn primary" data-apply>Übernehmen</button>`,
-      onDismiss: () => resolve(),
-      onMount: (m, c) => {
-        $('[data-skip]', m).onclick = () => { c(); resolve(); };
-        $('[data-apply]', m).onclick = () => {
-          const selected = [];
-          $$('[data-diff]', m).forEach(cb => { if (cb.checked) selected.push(diffs[parseInt(cb.dataset.diff)]); });
-          if (selected.length) DB.applyCardioDayDiffs(dayId, selected);
-          c(); resolve();
-        };
-      },
-    });
-  });
-}
 
 // ---------- Bestehende Kardio-Einheit ansehen/bearbeiten ----------
 route('/cardio-session/:id', ({ id }) => {
@@ -3027,11 +2971,6 @@ route('/settings', () => {
       <input type="file" id="impFile" accept="application/json,.json" hidden />
 
       <hr class="sep" />
-      <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Übungsbibliothek</div>
-      <p class="tiny muted" style="margin-top:0">Ergänzt neue Standard-Übungen aus der kuratierten Bibliothek, die noch fehlen. Eigene Übungen/Namen werden dabei nicht verändert oder gelöscht.</p>
-      <button class="btn ghost block" id="addLibBtn">Fehlende Standard-Übungen ergänzen</button>
-
-      <hr class="sep" />
       <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Beispieldaten</div>
       <label class="field" style="margin:0;display:flex;align-items:center;gap:10px">
         <input id="s-demo" type="checkbox" ${activeLoc && DB.hasDemoSessions(activeLoc.id) ? 'checked' : ''} style="width:auto" />
@@ -3124,12 +3063,6 @@ route('/settings', () => {
   };
 
   $('#openTrashBtn', appEl).onclick = () => openTrashModal();
-
-  $('#addLibBtn', appEl).onclick = () => {
-    const added = addMissingLibraryExercises();
-    toast(added ? `${added} neue Übung(en) ergänzt` : 'Du hast bereits alle Standard-Übungen');
-    if (added) render();
-  };
 
   $('#s-demo', appEl).onchange = e => {
     if (e.target.checked) {
@@ -3419,20 +3352,6 @@ const BEEDLE_PLAN = {
     ['wadenheben-stehend', 3, 14, 60],
   ] },
 };
-
-// Ergänzt Übungen aus der kuratierten LIBRARY_EXERCISES, die in der Bibliothek
-// des Nutzers noch fehlen (Abgleich über findDuplicateExercise: Name+Muskeln+
-// Gerät) - rein additiv, verändert/löscht nichts Bestehendes. So kommen
-// Überarbeitungen der Standard-Bibliothek auch bei bereits eingerichteten
-// Installationen an, ohne die reale Trainingshistorie zu berühren (die einmalige
-// SEED_VERSION-Migration würde dafür alles löschen und neu aufsetzen).
-function addMissingLibraryExercises() {
-  let added = 0;
-  LIBRARY_EXERCISES.forEach(({ key, ...data }) => {
-    if (!DB.findDuplicateExercise(data)) { DB.addExercise(data); added++; }
-  });
-  return added;
-}
 
 function seedInitialContent() {
   const byKey = new Map();
