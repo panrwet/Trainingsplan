@@ -249,8 +249,19 @@ function navigate(hash) { location.hash = hash; }
 // Pläne ist die neue Startseite (Start-Tab entfällt - hatte keine eigene
 // Funktion mehr, nachdem "Laufendes Training" nach Pläne gewandert und
 // "Zuletzt" entfernt wurde, da der Kalender diese Übersicht bereits bietet).
+// Beim Routenwechsel offene Modals schließen. Ohne das bleibt ein Dialog über der
+// neuen Ansicht liegen (modalRoot liegt außerhalb von appEl und wird beim Rendern
+// nicht angetastet) - dann bezieht sich ein "Speichern" auf einen Datensatz, der
+// gar nicht mehr sichtbar ist. Nur bei echtem Routenwechsel, nicht bei jedem
+// render(): Modals rufen render() selbst auf, um die Liste im Hintergrund zu
+// aktualisieren, und dürfen sich dabei nicht selbst zumachen.
+let lastRenderedRoute = null;
+function closeAllModals() { modalRoot.innerHTML = ''; }
+
 function render() {
   const hash = location.hash.replace(/^#/, '') || '/plans';
+  if (lastRenderedRoute !== null && lastRenderedRoute !== hash) closeAllModals();
+  lastRenderedRoute = hash;
   for (const r of routes) {
     const m = hash.match(r.rx);
     if (m) {
@@ -370,7 +381,7 @@ route('/plans', () => {
   // von einem anderen, bereits bestehenden Ort übernehmen - egal wann dessen Pläne entstanden sind.
   const otherLocsHavePlans = DB.locations().some(l => l.id !== active.id && DB.plansByLocation(l.id).length);
   if (otherLocsHavePlans) {
-    html += `<button class="btn ghost block" id="importPlanBtn" style="margin-bottom:12px">📥 Plan von anderem Ort übernehmen</button>`;
+    html += `<button class="btn ghost block" id="copyPlanHereBtn" style="margin-bottom:12px">📥 Plan hierher kopieren</button>`;
   }
 
   if (!plans.length) {
@@ -404,8 +415,8 @@ route('/plans', () => {
   $$('[data-goto]', appEl).forEach(n => n.onclick = () => navigate(n.dataset.goto));
   $$('[data-edit-plan]', appEl).forEach(b => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); navigate('/plan/' + b.dataset.editPlan); });
   $$('[data-start]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); startTraining(n.dataset.start); });
-  const importPlanBtn = $('#importPlanBtn', appEl);
-  if (importPlanBtn) importPlanBtn.onclick = () => offerPlanImportModal(active.id, { closeLabel: 'Schließen' });
+  const copyPlanHereBtn = $('#copyPlanHereBtn', appEl);
+  if (copyPlanHereBtn) copyPlanHereBtn.onclick = () => copyPlanHereModal(active.id);
   appEl.append(el('button', { class: 'fab', onclick: () => editPlanModal(null, active.id) }, '+'));
 });
 
@@ -432,7 +443,7 @@ function editLocationModal(id) {
           close();
           render(); // Pläne für den neuen (bereits aktiven) Ort sofort anzeigen
           const hasOtherPlans = DB.locations().some(l => l.id !== newLoc.id && DB.plansByLocation(l.id).length);
-          if (hasOtherPlans) offerPlanImportModal(newLoc.id);
+          if (hasOtherPlans) copyPlanHereModal(newLoc.id, { closeLabel: 'Ohne Plan starten' });
         }
       };
       const del = $('[data-del]', m);
@@ -445,35 +456,79 @@ function editLocationModal(id) {
   });
 }
 
-// Nach dem Anlegen eines neuen Orts anbieten, einen bestehenden Plan von
-// einem anderen Ort zu übernehmen (nur die Struktur - Übungen, Sätze/Wdh./
-// Pause -, keine Gewichts-/Wiederholungsdaten, die sind ja ortsabhängig).
-function offerPlanImportModal(newLocationId, { closeLabel = 'Ohne Plan starten' } = {}) {
-  const otherLocs = DB.locations().filter(l => l.id !== newLocationId);
-  const rows = [];
-  otherLocs.forEach(loc => {
-    DB.plansByLocation(loc.id).forEach(p => rows.push({ plan: p, loc }));
-  });
+// ---------- Kopieren: immer „hierher" ----------
+// Kopiert wird ausschließlich von dort, wo die Kopie landen soll: in der
+// Plan-Liste holt man einen ganzen Plan an den aktiven Ort, im Plan einen
+// einzelnen Trainingstag in diesen Plan. Ein Richtungs-Modell, zwei Ebenen.
+// Kopiert wird nur die Struktur (Übungen, Sätze/Wdh./Pause) - Gewichte und
+// Trainingsverlauf bleiben beim Original, die sind ortsabhängig.
+// Gemeinsames Grundgerüst beider Dialoge: antippen kopiert, Zeile wird als
+// erledigt markiert, mehrere Kopien pro Aufruf sind möglich.
+function copyHereModal({ title, hint, rows, emptyText, closeLabel, onCopy, doneToast }) {
   openModal({
-    title: 'Plan übernehmen?',
-    body: `<p class="tiny muted" style="margin-top:0">Übernimm einen bestehenden Plan von einem anderen Ort als Kopie - nur die Struktur (Übungen, Sätze/Wdh./Pause), keine Gewichte oder Trainingsverlauf. Du kannst mehrere übernehmen.</p>
-      <div id="planImportList">${rows.map(r => `<div class="list-row" data-import-plan="${r.plan.id}">
-        <div class="chip" style="background:${esc(r.plan.color)}22;color:${esc(r.plan.color)}">${esc(r.plan.emoji)}</div>
-        <div class="grow"><div class="r-title">${esc(r.plan.name)}</div>
-          <div class="r-sub">von ${esc(r.loc.emoji)} ${esc(r.loc.name)}</div></div>
-        <span class="arrow">＋</span></div>`).join('') || '<div class="tiny muted center" style="padding:10px">Keine Pläne vorhanden.</div>'}</div>`,
-    footer: `<button class="btn ghost" data-x>${esc(closeLabel)}</button>`,
+    title,
+    body: `<p class="tiny muted" style="margin-top:0">${hint}</p>
+      <div id="copyList">${rows.map(r => `<div class="list-row" data-copy="${r.id}">
+        <div class="chip" style="background:${esc(r.color)}22;color:${esc(r.color)}">${esc(r.emoji)}</div>
+        <div class="grow"><div class="r-title">${esc(r.name)}</div>
+          <div class="r-sub">${esc(r.source)}</div></div>
+        <span class="arrow">＋</span></div>`).join('') || `<div class="tiny muted center" style="padding:10px">${esc(emptyText)}</div>`}</div>`,
+    footer: `<button class="btn ghost block" data-x>${esc(closeLabel)}</button>`,
     onMount: (m, close) => {
       $('[data-x]', m).onclick = close;
-      $$('[data-import-plan]', m).forEach(row => row.onclick = () => {
-        const planId = row.dataset.importPlan;
-        DB.copyPlanToLocation(planId, newLocationId);
+      $$('[data-copy]', m).forEach(row => row.onclick = () => {
+        onCopy(row.dataset.copy);
         row.querySelector('.arrow').textContent = '✓';
         row.style.opacity = '.6'; row.style.pointerEvents = 'none';
-        toast('Plan übernommen');
-        render(); // Pläne-Liste im Hintergrund aktualisieren, egal wie das Modal geschlossen wird
+        toast(doneToast);
+        render(); // Liste im Hintergrund aktualisieren, egal wie das Modal geschlossen wird
       });
     },
+  });
+}
+
+// Ganzen Plan von einem anderen Ort an diesen Ort kopieren.
+function copyPlanHereModal(targetLocationId, { closeLabel = 'Schließen' } = {}) {
+  const target = DB.getLocation(targetLocationId);
+  const rows = [];
+  DB.locations().filter(l => l.id !== targetLocationId).forEach(loc => {
+    DB.plansByLocation(loc.id).forEach(p => rows.push({
+      id: p.id, name: p.name, emoji: p.emoji, color: p.color,
+      source: `von ${loc.emoji} ${loc.name}`,
+    }));
+  });
+  copyHereModal({
+    title: 'Plan hierher kopieren',
+    hint: `Kopiert einen Plan inkl. aller Trainingstage nach <b>${esc(target ? target.emoji + ' ' + target.name : 'diesen Ort')}</b>. Die Kopie ist unabhängig vom Original. Du kannst mehrere kopieren.`,
+    rows,
+    emptyText: 'An anderen Orten sind noch keine Pläne vorhanden.',
+    closeLabel,
+    onCopy: planId => DB.copyPlanToLocation(planId, targetLocationId),
+    doneToast: 'Plan kopiert',
+  });
+}
+
+// Einzelnen Trainingstag in diesen Plan kopieren - aus jedem Ort und jedem Plan,
+// ausdrücklich auch aus dem eigenen (zum Duplizieren eines Trainingstags).
+function copyDayHereModal(targetPlanId) {
+  const target = DB.getPlan(targetPlanId);
+  const rows = [];
+  DB.locations().forEach(loc => {
+    DB.plansByLocation(loc.id).forEach(p => {
+      DB.daysByPlan(p.id).forEach(day => rows.push({
+        id: day.id, name: day.name, emoji: day.emoji, color: day.color,
+        source: `${loc.emoji} ${loc.name} · ${p.emoji} ${p.name}${p.id === targetPlanId ? ' (dieser Plan)' : ''} · ${day.exercises.length} Übungen`,
+      }));
+    });
+  });
+  copyHereModal({
+    title: 'Trainingstag hierher kopieren',
+    hint: `Kopiert einen Trainingstag inkl. Übungen und Zielwerten nach <b>${esc(target ? target.emoji + ' ' + target.name : 'diesen Plan')}</b>. Aus jedem Ort und Plan – auch aus diesem, zum Duplizieren. Du kannst mehrere kopieren.`,
+    rows,
+    emptyText: 'Es gibt noch keine Trainingstage zum Kopieren.',
+    closeLabel: 'Schließen',
+    onCopy: dayId => DB.copyDayToPlan(dayId, targetPlanId),
+    doneToast: 'Trainingstag kopiert',
   });
 }
 
@@ -506,34 +561,6 @@ function editPlanModal(id, locationId) {
   });
 }
 
-// Plan (inkl. aller Trainingstage) als unabhängige Kopie an einen anderen Ort
-// übernehmen. Übungen werden nicht dupliziert (gemeinsame Bibliothek) –
-// nur Statistik/"letztes Mal" bleiben je Ort weiterhin getrennt.
-function copyPlanToLocationModal(planId) {
-  const p = DB.getPlan(planId);
-  const targets = DB.locations().filter(l => l.id !== p.locationId);
-  if (!targets.length) return toast('Kein weiterer Ort vorhanden – lege zuerst einen zweiten Ort an.');
-  openModal({
-    title: 'Plan kopieren nach …',
-    body: `<p class="tiny muted" style="margin-top:0">„${esc(p.name)}" wird inkl. aller Trainingstage als unabhängige Kopie angelegt – Änderungen an der Kopie wirken sich nicht auf das Original aus.</p>
-      <div>${targets.map(l => `<div class="list-row" data-target="${l.id}">
-        <div class="chip" style="background:${esc(l.color)}22;color:${esc(l.color)}">${esc(l.emoji)}</div>
-        <div class="grow"><div class="r-title">${esc(l.name)}</div></div><span class="arrow">›</span></div>`).join('')}</div>`,
-    footer: `<button class="btn ghost" data-x>Abbrechen</button>`,
-    onMount: (m, close) => {
-      $('[data-x]', m).onclick = close;
-      $$('[data-target]', m).forEach(n => n.onclick = () => {
-        const targetId = n.dataset.target;
-        const newPlan = DB.copyPlanToLocation(planId, targetId);
-        close();
-        DB.setActiveLocation(targetId);
-        toast(`Kopiert nach ${DB.getLocation(targetId).name}`);
-        navigate('/plan/' + newPlan.id);
-      });
-    },
-  });
-}
-
 // ============================================================
 //  Ansicht: Plan-Detail (Trainingstage)
 // ============================================================
@@ -541,13 +568,19 @@ route('/plan/:id', ({ id }) => {
   const p = DB.getPlan(id);
   if (!p) return navigate('/plans');
   setChrome({ title: `${p.emoji} ${p.name}`, back: true, actions: [
-    actionBtn('📤', () => copyPlanToLocationModal(id), ''),
     actionBtn('✏️', () => editPlanModal(id, p.locationId)),
   ] });
   const loc = DB.getLocation(p.locationId);
   const days = DB.daysByPlan(id);
   let html = `${loc ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(loc.emoji)} ${esc(loc.name)}</div>` : ''}
     <div class="section-title">Trainingstage</div>`;
+  // Gleiche Stelle und gleiche Formulierung wie „Plan hierher kopieren" in der
+  // Plan-Liste - nur eine Ebene tiefer. Sichtbar, sobald es irgendwo einen
+  // Trainingstag gibt (auch in diesem Plan selbst, zum Duplizieren).
+  const anyDaysExist = DB.db().days.length > 0;
+  if (anyDaysExist) {
+    html += `<button class="btn ghost block" id="copyDayHereBtn" style="margin-bottom:12px">📥 Trainingstag hierher kopieren</button>`;
+  }
   if (!days.length) {
     html += `<div class="empty"><div class="big">💪</div><div>Noch keine Trainingstage.</div>
       <div class="tiny" style="margin:8px 0 0">Ein Trainingstag ist z.B. „Push A" oder „Beine".</div></div>`;
@@ -557,18 +590,45 @@ route('/plan/:id', ({ id }) => {
         <div class="chip" style="background:${esc(day.color)}22;color:${esc(day.color)}">${esc(day.emoji)}</div>
         <div class="grow"><div class="r-title">${esc(day.name)}</div>
           <div class="r-sub">${day.exercises.length} Übungen</div></div>
-        <span class="mv" data-up="${day.id}" style="padding:4px 8px;color:var(--text-dim2)">▲</span>
-        <span class="mv" data-down="${day.id}" style="padding:4px 8px;color:var(--text-dim2)">▼</span>
+        ${moveArrowsHTML(day.id, i > 0, i < days.length - 1)}
         <span class="arrow">›</span></div>`;
     });
   }
   appEl.innerHTML = html;
+  const copyDayHereBtn = $('#copyDayHereBtn', appEl);
+  if (copyDayHereBtn) copyDayHereBtn.onclick = () => copyDayHereModal(id);
   $$('[data-day]', appEl).forEach(n => n.onclick = (e) => { if (e.target.closest('.mv')) return; navigate('/day/' + n.dataset.day); });
   const ids = days.map(d => d.id);
   $$('[data-up]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); moveInArray(ids, n.dataset.up, -1); DB.reorderDays(id, ids); render(); });
   $$('[data-down]', appEl).forEach(n => n.onclick = (e) => { e.stopPropagation(); moveInArray(ids, n.dataset.down, +1); DB.reorderDays(id, ids); render(); });
   appEl.append(el('button', { class: 'fab', onclick: () => editDayModal(null, id) }, '+'));
 });
+
+// Auf/Ab-Pfeile einer sortierbaren Zeile - eine Stelle für alle vier Listen
+// (Plan-Trainingstage, Kardio-Plan-Trainingstage, Reihenfolge-Modus im Trainingstag
+// und im Training), damit sie sich überall gleich verhalten: am Rand abgeblendet
+// UND gesperrt. Vorher sahen die Pfeile in den Plan-Ansichten immer aktiv aus,
+// ein Tap auf das ▲ der ersten Zeile tat aber nichts.
+// attr wählt die Datenattribute, weil das Training index- statt id-basiert arbeitet.
+function moveArrowsHTML(key, canUp, canDown, attr = ['up', 'down']) {
+  const style = blocked => `padding:4px 8px;color:${blocked ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${blocked ? 'none' : 'auto'}`;
+  return `<span class="mv" data-${attr[0]}="${key}" style="${style(!canUp)}">▲</span>`
+    + `<span class="mv" data-${attr[1]}="${key}" style="${style(!canDown)}">▼</span>`;
+}
+
+// Kann das Element an Index idx überhaupt noch bewegt werden? reorderStep bewegt
+// einen Zirkel immer als EINEN Block - ein Mitglied mitten in der Liste kann also
+// trotzdem am Rand stehen, wenn sein Block dort anliegt. Ohne diese Prüfung waren
+// die Pfeile bei Gruppenmitgliedern am Listenrand aktiv, aber wirkungslos.
+function reorderBounds(list, idx) {
+  const gid = list[idx] ? list[idx].groupId : null;
+  let start = idx, end = idx;
+  if (gid) {
+    while (start > 0 && list[start - 1].groupId === gid) start--;
+    while (end < list.length - 1 && list[end + 1].groupId === gid) end++;
+  }
+  return { canUp: start > 0, canDown: end < list.length - 1 };
+}
 
 function moveInArray(arr, id, dir) {
   const i = arr.indexOf(id); const j = i + dir;
@@ -653,49 +713,52 @@ function editDayModal(id, planId) {
 // ============================================================
 //  Ansicht: Trainingstag-Detail (Übungen mit Zielwerten)
 // ============================================================
+// Zirkel-/Reihenfolge-Modus: gleiche Zustandsform wie trainMode im laufenden
+// Training ('select' | 'reorder' | null), damit sich beide Ansichten gleich
+// verhalten und gleich lesen. Hier route-lokal möglich, weil draw() eine Closure
+// des Route-Handlers ist - renderTrain() wird dagegen von außerhalb der Route
+// aufgerufen und braucht deshalb modul-globalen Zustand.
 route('/day/:id', ({ id }) => {
   const day = DB.getDay(id);
   if (!day) return navigate('/plans');
   const plan = DB.getPlan(day.planId);
   const loc = plan ? DB.getLocation(plan.locationId) : null;
-  let selectMode = false;
-  let reorderMode = false;
+  let dayMode = null; // null | 'select' | 'reorder'
   const selected = new Set();
 
+  const addExercises = () => pickExercisesModal(exIds => {
+    exIds.forEach(exId => DB.addExerciseToDay(id, exId));
+    toast(exIds.length > 1 ? `${exIds.length} Übungen hinzugefügt` : 'Übung hinzugefügt');
+    render();
+  }, day.exercises.map(x => x.exerciseId));
+
   function draw() {
-    const anyMode = selectMode || reorderMode;
-    setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: anyMode ? [] : [actionBtn('✏️', () => editDayModal(id, day.planId))] });
+    setChrome({
+      title: `${day.emoji} ${day.name}`, back: true,
+      actions: dayMode ? [] : [actionBtn('⚙️', () => daySettingsModal(day, {
+        onGroup: () => { dayMode = 'select'; selected.clear(); draw(); },
+        onReorder: () => { dayMode = 'reorder'; draw(); },
+        onAddExercise: addExercises,
+      }))],
+    });
 
     let html = `${loc ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(loc.emoji)} ${esc(loc.name)} · ${esc(plan.emoji)} ${esc(plan.name)}</div>` : ''}`;
-    if (!anyMode) html += `<button class="btn good block" id="startBtn" style="margin-bottom:16px">▶ Training starten</button>`;
+    if (!dayMode) html += `<button class="btn good block" id="startBtn" style="margin-bottom:16px">▶ Training starten</button>`;
     html += `<div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
       <span>Übungen</span>
-      ${selectMode ? `<span class="tiny muted">${selected.size} ausgewählt</span>`
-        : reorderMode ? `<span class="tiny muted">Reihenfolge anpassen</span>`
-        : (day.exercises.length > 1 ? `<div style="display:flex;gap:6px">
-            <button class="btn ghost sm" id="startGroupBtn">🔗 Zirkel erstellen</button>
-            <button class="btn ghost sm" id="startReorderBtn">↕ Reihenfolge</button>
-          </div>` : '')}
+      ${dayMode === 'select' ? `<span class="tiny muted">${selected.size} ausgewählt</span>`
+        : dayMode === 'reorder' ? `<span class="tiny muted">Reihenfolge anpassen</span>` : ''}
     </div>`;
 
     if (!day.exercises.length) {
       html += `<div class="empty"><div class="big">📚</div><div>Noch keine Übungen.</div>
         <div class="tiny" style="margin:8px 0 0">Füge Übungen aus deiner Bibliothek hinzu.</div></div>`;
-    } else if (selectMode) {
+    } else if (dayMode === 'select') {
       html += `<p class="tiny muted" style="margin-top:0">Wähle 2 oder mehr Übungen, die als Zirkel ohne Pause dazwischen trainiert werden sollen.</p>`;
-      day.exercises.forEach(item => { html += dayExerciseCardHTML(item, true, selected); });
-    } else if (reorderMode) {
+      day.exercises.forEach(item => { html += daySelectCardHTML(item, selected); });
+    } else if (dayMode === 'reorder') {
       html += `<p class="tiny muted" style="margin-top:0">Mit ▲/▼ die Reihenfolge der Übungen ändern. Zirkel-Übungen bewegen sich als Block.</p>`;
-      day.exercises.forEach((item, idx) => {
-        const ex = DB.getExercise(item.exerciseId);
-        html += `<div class="card">
-          <div style="display:flex;align-items:center;gap:8px">
-            <div class="grow"><b>${item.groupId ? '🔗 ' : ''}${esc(ex ? ex.name : '(gelöscht)')}</b></div>
-            <span class="mv" data-up="${item.id}" style="padding:4px 8px;color:${idx === 0 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${idx === 0 ? 'none' : 'auto'}">▲</span>
-            <span class="mv" data-down="${item.id}" style="padding:4px 8px;color:${idx === day.exercises.length - 1 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${idx === day.exercises.length - 1 ? 'none' : 'auto'}">▼</span>
-          </div>
-        </div>`;
-      });
+      day.exercises.forEach((item, idx) => { html += dayReorderCardHTML(item, idx, day.exercises); });
     } else {
       let i = 0;
       while (i < day.exercises.length) {
@@ -704,19 +767,19 @@ route('/day/:id', ({ id }) => {
           let j = i;
           while (j < day.exercises.length && day.exercises[j].groupId === gid) j++;
           html += `<div class="superset-wrap"><div class="superset-label" style="display:flex;justify-content:space-between;align-items:center">
-            <span>🔗 Zirkel</span><button class="btn ghost sm" data-ungroup="${gid}">Auflösen</button></div>`;
-          for (let k = i; k < j; k++) html += dayExerciseCardHTML(day.exercises[k], false, selected);
+            <span>🔗 Zirkel – keine Pause zwischen den Übungen</span><button class="btn ghost sm" data-ungroup="${gid}">Auflösen</button></div>`;
+          for (let k = i; k < j; k++) html += dayExerciseCardHTML(day.exercises[k], loc?.id);
           html += `</div>`;
           i = j;
         } else {
-          html += dayExerciseCardHTML(day.exercises[i], false, selected);
+          html += dayExerciseCardHTML(day.exercises[i], loc?.id);
           i++;
         }
       }
     }
     appEl.innerHTML = html;
 
-    if (selectMode) {
+    if (dayMode === 'select') {
       $$('[data-select]', appEl).forEach(n => n.onclick = () => {
         const iid = n.dataset.select;
         selected.has(iid) ? selected.delete(iid) : selected.add(iid);
@@ -726,18 +789,18 @@ route('/day/:id', ({ id }) => {
       bar.innerHTML = `<button class="btn ghost" id="cancelGroupBtn">Abbrechen</button>
         <button class="btn primary" id="confirmGroupBtn" ${selected.size < 2 ? 'disabled' : ''}>🔗 Gruppieren (${selected.size})</button>`;
       appEl.append(bar);
-      $('#cancelGroupBtn', bar).onclick = () => { selectMode = false; selected.clear(); draw(); };
+      $('#cancelGroupBtn', bar).onclick = () => { dayMode = null; selected.clear(); draw(); };
       $('#confirmGroupBtn', bar).onclick = () => {
         if (selected.size < 2) return;
         DB.groupExercises(id, [...selected]);
         toast('Zirkel erstellt');
-        selectMode = false; selected.clear();
-        render();
+        dayMode = null; selected.clear();
+        draw();
       };
       return;
     }
 
-    if (reorderMode) {
+    if (dayMode === 'reorder') {
       $$('[data-up]', appEl).forEach(n => n.onclick = () => {
         const idx = day.exercises.findIndex(x => x.id === n.dataset.up);
         if (idx >= 0) reorderStep(day.exercises, idx, -1);
@@ -751,56 +814,146 @@ route('/day/:id', ({ id }) => {
       const bar = el('div', { class: 'select-bar' });
       bar.innerHTML = `<button class="btn primary block" id="doneReorderBtn">Fertig</button>`;
       appEl.append(bar);
-      $('#doneReorderBtn', bar).onclick = () => { reorderMode = false; render(); };
+      $('#doneReorderBtn', bar).onclick = () => { dayMode = null; draw(); };
       return;
     }
 
     const startBtn = $('#startBtn', appEl);
     if (startBtn) startBtn.onclick = () => { if (!day.exercises.length) return toast('Erst Übungen hinzufügen'); startTraining(id); };
-    const startGroupBtn = $('#startGroupBtn', appEl);
-    if (startGroupBtn) startGroupBtn.onclick = () => { selectMode = true; selected.clear(); draw(); };
-    const startReorderBtn = $('#startReorderBtn', appEl);
-    if (startReorderBtn) startReorderBtn.onclick = () => { reorderMode = true; draw(); };
-    $$('[data-edit]', appEl).forEach(n => n.onclick = () => editDayExerciseModal(id, n.dataset.edit));
-    $$('[data-rm]', appEl).forEach(n => n.onclick = async () => {
-      if (await confirmDialog('Übung aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) { DB.removeDayExercise(id, n.dataset.rm); render(); }
-    });
+    $$('[data-menu]', appEl).forEach(n => n.onclick = () => dayExerciseMenuModal(id, n.dataset.menu, draw));
     $$('[data-ungroup]', appEl).forEach(n => n.onclick = async () => {
-      if (await confirmDialog('Zirkel auflösen?', { okText: 'Auflösen' })) { DB.ungroupExercises(id, n.dataset.ungroup); render(); }
+      if (await confirmDialog('Zirkel auflösen?', { okText: 'Auflösen' })) { DB.ungroupExercises(id, n.dataset.ungroup); draw(); }
     });
-    appEl.append(el('button', { class: 'fab', onclick: () => pickExerciseModal(exId => {
-      DB.addExerciseToDay(id, exId); render();
-    }, day.exercises.map(x => x.exerciseId)) }, '+'));
+    appEl.append(el('button', { class: 'fab', onclick: addExercises }, '+'));
   }
   draw();
 });
 
-function dayExerciseCardHTML(item, selectMode, selected) {
+// Struktur-Menü des Trainingstags - bewusst gleich aufgebaut, gleich sortiert und
+// gleich beschriftet wie trainSettingsModal (das Gegenstück im laufenden Training).
+function daySettingsModal(day, { onGroup, onReorder, onAddExercise }) {
+  const plan = DB.getPlan(day.planId);
+  openModal({
+    title: 'Trainingstag – Einstellungen',
+    body: `<div class="sheet">
+      ${day.exercises.length > 1 ? `<button class="sheet-btn" data-act="group">🔗 Zirkel erstellen</button>
+      <button class="sheet-btn" data-act="reorder">↕ Reihenfolge anpassen</button>` : ''}
+      <button class="sheet-btn" data-act="addex">➕ Übung hinzufügen</button>
+      <button class="sheet-btn" data-act="editday">✏️ Trainingstag bearbeiten</button>
+      ${plan ? '<button class="sheet-btn" data-act="editplan">📋 Plan bearbeiten</button>' : ''}
+    </div>`,
+    footer: `<button class="btn ghost block" data-x>Schließen</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      const group = $('[data-act="group"]', m);
+      if (group) group.onclick = () => { close(); onGroup(); };
+      const reorder = $('[data-act="reorder"]', m);
+      if (reorder) reorder.onclick = () => { close(); onReorder(); };
+      $('[data-act="addex"]', m).onclick = () => { close(); onAddExercise(); };
+      $('[data-act="editday"]', m).onclick = () => { close(); editDayModal(day.id, day.planId); };
+      const editplan = $('[data-act="editplan"]', m);
+      if (editplan) editplan.onclick = () => { close(); navigate('/plan/' + day.planId); };
+    },
+  });
+}
+
+// Aktions-Menü einer Übung im Trainingstag - Gegenstück zu trainExerciseMenuModal.
+// Die letzten drei Einträge (Ersetzen / Notiz / Entfernen) sind absichtlich in
+// beiden Ansichten identisch benannt und identisch angeordnet.
+function dayExerciseMenuModal(dayId, itemId, after) {
+  const day = DB.getDay(dayId);
+  const item = day ? day.exercises.find(x => x.id === itemId) : null;
+  if (!item) return;
   const ex = DB.getExercise(item.exerciseId);
-  if (selectMode) {
-    const isSel = selected.has(item.id);
-    return `<div class="card tap select-card ${isSel ? 'sel' : ''}" data-select="${item.id}">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div class="select-check ${isSel ? 'on' : ''}">${isSel ? '✓' : ''}</div>
-        <div class="grow"><b>${esc(ex ? ex.name : '(gelöscht)')}</b>
-          <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh</div></div>
-      </div>
-    </div>`;
-  }
+  const plan = DB.getPlan(day.planId);
+  const locId = plan ? plan.locationId : null;
+  const hasNote = locId ? !!DB.getExerciseNote(item.exerciseId, locId) : false;
+  openModal({
+    title: ex ? ex.name : 'Übung',
+    body: `<div class="sheet">
+      <button class="sheet-btn" data-act="targets">🎯 Zielwerte ändern <span class="tiny muted">(${item.sets}×${item.reps}, Pause ${item.restSec}s)</span></button>
+      <button class="sheet-btn" data-act="replace">🔄 Übung ersetzen</button>
+      ${locId ? `<button class="sheet-btn" data-act="note">📝 ${hasNote ? 'Notiz bearbeiten' : 'Notiz hinzufügen'}</button>` : ''}
+      <button class="sheet-btn danger" data-act="remove">🗑️ Übung aus Trainingstag entfernen</button>
+    </div>`,
+    footer: `<button class="btn ghost block" data-x>Abbrechen</button>`,
+    onMount: (m, close) => {
+      $('[data-x]', m).onclick = close;
+      $('[data-act="targets"]', m).onclick = () => { close(); editDayExerciseModal(dayId, itemId, after); };
+      $('[data-act="replace"]', m).onclick = () => {
+        close();
+        // Zielwerte (Sätze/Wdh./Pause) und Zirkel-Zugehörigkeit bleiben erhalten -
+        // nur die Übung selbst wird getauscht (analog zum Training, wo die
+        // Ziel-Satzanzahl ebenfalls bestehen bleibt).
+        pickExerciseModal(exId => {
+          DB.updateDayExercise(dayId, itemId, { exerciseId: exId });
+          toast('Übung ersetzt');
+          if (after) after();
+        }, day.exercises.filter(x => x.id !== itemId).map(x => x.exerciseId));
+      };
+      const note = $('[data-act="note"]', m);
+      if (note) note.onclick = () => { close(); editExerciseNoteModal(item.exerciseId, locId, after); };
+      $('[data-act="remove"]', m).onclick = async () => {
+        close();
+        if (await confirmDialog('Übung aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) {
+          DB.removeExerciseFromDay(dayId, itemId);
+          if (after) after();
+        }
+      };
+    },
+  });
+}
+
+// Kartendarstellung einer Übung im Trainingstag. Drei Varianten, spiegelbildlich
+// zu den Gegenstücken im laufenden Training benannt:
+//   dayExerciseCardHTML  <->  renderExerciseBlock   (Normalansicht)
+//   daySelectCardHTML    <->  trainSelectCardHTML   (Zirkel-Auswahl)
+//   dayReorderCardHTML   <->  trainReorderCardHTML  (Reihenfolge)
+function dayExerciseCardHTML(item, locationId) {
+  const ex = DB.getExercise(item.exerciseId);
+  // Geräte-Notiz genauso sichtbar wie im laufenden Training (renderExerciseBlock) -
+  // sie wird in DIESER Ansicht gepflegt, war hier aber bisher unsichtbar.
+  const noteRec = locationId ? DB.getExerciseNote(item.exerciseId, locationId) : null;
+  // Ein "⋮"-Menü pro Übung - identische Bedienung wie im laufenden Training,
+  // statt separater ✏️/🗑️-Buttons.
   return `<div class="card" data-item="${item.id}">
     <div style="display:flex;align-items:center;gap:8px">
       <div class="grow" style="flex:1"><b>${esc(ex ? ex.name : '(gelöscht)')}</b>
         ${ex ? tagBadgesHTML(ex) : ''}
-        <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh · Pause ${item.restSec}s</div></div>
-      <button class="btn ghost sm" data-edit="${item.id}">✏️</button>
-      <button class="btn ghost sm" data-rm="${item.id}">🗑️</button>
+        <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh · Pause ${item.restSec}s</div>
+        ${noteRec ? `<div class="ex-note">📝 ${esc(noteRec.text)}</div>` : ''}</div>
+      <button class="btn ghost sm" data-menu="${item.id}">⋮</button>
+    </div>
+  </div>`;
+}
+function daySelectCardHTML(item, selected) {
+  const ex = DB.getExercise(item.exerciseId);
+  const isSel = selected.has(item.id);
+  // 🔗 zeigt an, dass die Übung SCHON in einem Zirkel ist - ohne diesen Hinweis
+  // gruppiert man versehentlich quer über eine bestehende Gruppe (die dabei
+  // aufgelöst wird, siehe releaseOldGroups).
+  return `<div class="card tap select-card ${isSel ? 'sel' : ''}" data-select="${item.id}">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="select-check ${isSel ? 'on' : ''}">${isSel ? '✓' : ''}</div>
+      <div class="grow"><b>${item.groupId ? '🔗 ' : ''}${esc(ex ? ex.name : '(gelöscht)')}</b>
+        <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh</div></div>
+    </div>
+  </div>`;
+}
+function dayReorderCardHTML(item, idx, list) {
+  const ex = DB.getExercise(item.exerciseId);
+  const { canUp, canDown } = reorderBounds(list, idx);
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="grow"><b>${item.groupId ? '🔗 ' : ''}${esc(ex ? ex.name : '(gelöscht)')}</b></div>
+      ${moveArrowsHTML(item.id, canUp, canDown)}
     </div>
   </div>`;
 }
 
-function editDayExerciseModal(dayId, itemId) {
+function editDayExerciseModal(dayId, itemId, after) {
   const day = DB.getDay(dayId);
-  const item = day.exercises.find(x => x.id === itemId);
+  const item = day ? day.exercises.find(x => x.id === itemId) : null;
   if (!item) return;
   const ex = DB.getExercise(item.exerciseId);
   openModal({
@@ -820,7 +973,8 @@ function editDayExerciseModal(dayId, itemId) {
           reps: Math.max(1, parseInt($('#f-reps', m).value) || 1),
           restSec: Math.max(0, parseInt($('#f-rest', m).value) || 0),
         });
-        close(); render();
+        close();
+        if (after) after(); else render();
       };
     },
   });
@@ -829,39 +983,83 @@ function editDayExerciseModal(dayId, itemId) {
 // ============================================================
 //  Übungs-Auswahl / Bibliothek
 // ============================================================
+// Gemeinsame Übungs-Auswahl für alle Stellen, die eine Übung aus der Bibliothek
+// holen. Zwei Aufruf-Varianten mit identischer Optik:
+//   pickExerciseModal(onPick, exclude)   - genau EINE Übung (z.B. "Übung ersetzen")
+//   pickExercisesModal(onPickMany, exclude) - MEHRERE per Häkchen auf einmal
+// (Namenskonvention: Singular = einzeln, Plural = Mehrfachauswahl.)
 function pickExerciseModal(onPick, excludeIds = []) {
+  exercisePickerModal({ multi: false, excludeIds, onDone: ids => onPick(ids[0]) });
+}
+function pickExercisesModal(onPickMany, excludeIds = []) {
+  exercisePickerModal({ multi: true, excludeIds, onDone: onPickMany });
+}
+
+function exercisePickerModal({ multi, excludeIds = [], onDone }) {
   const list = DB.exercises();
   const excludeSet = new Set(excludeIds);
   // Eigene, frische Filter-Instanz je Aufruf (statt des geteilten /library-Filters
   // exFilter) - ein z.B. in der Bibliothek aktiver Muskel-/Gerätefilter soll hier
   // nicht unbemerkt weiter eingeschränkt anzeigen.
   const pickFilter = { muscles: new Set(), equipment: new Set(), matchMode: 'or' };
+  // Auswahl-Reihenfolge bewusst als Array (nicht Set): mehrere Übungen werden in
+  // genau der Reihenfolge hinzugefügt, in der sie angetippt wurden.
+  const picked = [];
   const body = `
     <input id="f-search" placeholder="Übung suchen …" style="margin-bottom:10px" />
     ${exerciseFilterHTML(pickFilter)}
     <button class="btn primary block" id="newEx" style="margin:12px 0">+ Neue Übung anlegen</button>
     <div id="exList"></div>`;
   openModal({
-    title: 'Übung wählen',
+    title: multi ? 'Übungen wählen' : 'Übung wählen',
     body,
+    footer: multi
+      ? `<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok disabled>Hinzufügen</button>`
+      : `<button class="btn ghost block" data-x>Abbrechen</button>`,
     onMount: (m, close) => {
       const listEl = $('#exList', m);
+      const okBtn = $('[data-ok]', m);
+      const syncOk = () => {
+        if (!okBtn) return;
+        okBtn.disabled = !picked.length;
+        okBtn.textContent = picked.length ? `Hinzufügen (${picked.length})` : 'Hinzufügen';
+      };
       const draw = (q = '') => {
         const items = applyExerciseFilter(list, pickFilter).filter(e => !q || e.name.toLowerCase().includes(q.toLowerCase()));
         listEl.innerHTML = items.length ? items.map(e => {
           const dup = excludeSet.has(e.id);
+          const sel = picked.indexOf(e.id) >= 0;
+          if (multi) {
+            return `<div class="list-row select-card ${sel ? 'sel' : ''} ${dup ? 'disabled' : ''}" ${dup ? '' : `data-pick="${e.id}"`}>
+              <div class="select-check ${sel ? 'on' : ''}">${sel ? '✓' : ''}</div>
+              <div class="grow"><div class="r-title">${esc(e.name)}</div>
+                ${tagBadgesHTML(e)}
+                ${dup ? '<div class="tiny muted">Bereits enthalten</div>' : ''}</div></div>`;
+          }
           return `<div class="list-row ${dup ? 'disabled' : ''}" ${dup ? '' : `data-pick="${e.id}"`}>
             <div class="grow"><div class="r-title">${esc(e.name)}</div>
               ${tagBadgesHTML(e)}
-              ${dup ? '<div class="tiny muted">Bereits in diesem Trainingstag</div>' : ''}</div>
+              ${dup ? '<div class="tiny muted">Bereits enthalten</div>' : ''}</div>
             <span class="arrow">${dup ? '' : '＋'}</span></div>`;
         }).join('') : `<div class="tiny muted center" style="padding:12px">Keine Übung passt zum Filter.</div>`;
-        $$('[data-pick]', listEl).forEach(n => n.onclick = () => { close(); onPick(n.dataset.pick); });
+        $$('[data-pick]', listEl).forEach(n => n.onclick = () => {
+          const exId = n.dataset.pick;
+          if (!multi) { close(); onDone([exId]); return; }
+          const at = picked.indexOf(exId);
+          if (at >= 0) picked.splice(at, 1); else picked.push(exId);
+          draw($('#f-search', m).value);
+          syncOk();
+        });
       };
       draw();
+      syncOk();
       wireExerciseFilter(m, () => draw($('#f-search', m).value), pickFilter);
       $('#f-search', m).oninput = e => draw(e.target.value);
-      $('#newEx', m).onclick = () => { close(); editExerciseModal(null, newId => onPick(newId)); };
+      $('[data-x]', m).onclick = close;
+      if (okBtn) okBtn.onclick = () => { if (!picked.length) return; close(); onDone(picked.slice()); };
+      // Neu angelegte Übung direkt übernehmen (bei Mehrfachauswahl zusammen mit
+      // den bereits angetippten), damit der Umweg über die Bibliothek entfällt.
+      $('#newEx', m).onclick = () => { close(); editExerciseModal(null, newId => onDone(multi ? [...picked, newId] : [newId])); };
     },
   });
 }
@@ -886,6 +1084,16 @@ function tagBadgesHTML(ex) {
 // gewählten Muskeln müssen zutreffen, ODER = mindestens eine) - bei Geräten ist nur
 // ODER sinnvoll, da eine Übung immer genau ein Gerät hat.
 let exFilter = { muscles: new Set(), equipment: new Set(), matchMode: 'or' };
+
+// Nach "Alle Daten löschen" oder einem Import zeigen die gemerkten Filter-Namen auf
+// Muskelgruppen/Geräte, die es so nicht mehr geben muss - die Bibliothek stände dann
+// dauerhaft auf "Keine Übung passt zum Filter", ohne dass ein Filter sichtbar aktiv
+// wirkt. Deshalb beim Datenwechsel zurücksetzen.
+function resetExerciseFilter() {
+  exFilter.muscles.clear();
+  exFilter.equipment.clear();
+  exFilter.matchMode = 'or';
+}
 
 // Gemeinsame Filter-UI (Muskelgruppe/Gerät-Chips + UND/ODER-Umschalter), wird sowohl
 // in /library als auch in pickExerciseModal eingebettet. Nimmt den Filter-Zustand
@@ -919,7 +1127,7 @@ function exerciseFilterHTML(filterState = exFilter) {
 // Neu-Rendern - vermeidet Flackern/Fokusverlust in der Suche).
 function wireExerciseFilter(root, redraw, filterState = exFilter) {
   const mgChip = $('#manageMgChip', root); if (mgChip) mgChip.onclick = () => manageMuscleGroupsModal();
-  const eqChip = $('#manageEqChip', root); if (eqChip) eqChip.onclick = () => manageEquipmentModal();
+  const eqChip = $('#manageEqChip', root); if (eqChip) eqChip.onclick = () => manageEquipmentTypesModal();
   $$('[data-fm]', root).forEach(b => b.onclick = () => {
     const m = b.dataset.fm;
     filterState.muscles.has(m) ? filterState.muscles.delete(m) : filterState.muscles.add(m);
@@ -1030,7 +1238,7 @@ function editExerciseModal(id, onSaved) {
           muscles.has(b.dataset.mu) ? muscles.delete(b.dataset.mu) : muscles.add(b.dataset.mu);
           redrawMuscles();
         });
-        $('[data-add-mu]', m).onclick = () => quickAddMuscleGroup(name => { muscles.add(name); redrawMuscles(); });
+        $('[data-add-mu]', m).onclick = () => quickAddMuscleGroupModal(name => { muscles.add(name); redrawMuscles(); });
       }
       redrawMuscles();
       function redrawEquip() {
@@ -1041,7 +1249,7 @@ function editExerciseModal(id, onSaved) {
           equipment = equipment === b.dataset.e ? '' : b.dataset.e;
           redrawEquip();
         });
-        $('[data-add-eq]', m).onclick = () => quickAddEquipment(name => { equipment = name; redrawEquip(); });
+        $('[data-add-eq]', m).onclick = () => quickAddEquipmentModal(name => { equipment = name; redrawEquip(); });
       }
       redrawEquip();
       $('[data-x]', m).onclick = close;
@@ -1077,7 +1285,7 @@ function editExerciseModal(id, onSaved) {
 
 // Kleiner, gestapelter Dialog um schnell eine neue Geräte-Art anzulegen (z.B.
 // direkt beim Taggen einer Übung, ohne den aktuellen Dialog zu verlassen).
-function quickAddEquipment(onAdded) {
+function quickAddEquipmentModal(onAdded) {
   openModal({
     title: 'Neue Geräte-Art',
     body: `<label class="field"><span>Name</span><input id="f-eqname" placeholder="z.B. Widerstandsband" /></label>`,
@@ -1099,7 +1307,7 @@ function quickAddEquipment(onAdded) {
 // Geräte-Arten verwalten: anlegen, umbenennen (mit Übernahme bei allen
 // betroffenen Übungen) und löschen (entfernt das Tag bei betroffenen Übungen,
 // die Übung selbst bleibt erhalten).
-function manageEquipmentModal() {
+function manageEquipmentTypesModal() {
   let editingId = null;
   function draw(m) {
     const list = DB.equipmentTypes();
@@ -1125,7 +1333,10 @@ function manageEquipmentModal() {
     $$('[data-save]', listEl).forEach(b => b.onclick = () => {
       const rid = b.dataset.save;
       const val = $(`#f-rename-${rid}`, listEl).value.trim();
-      if (val) DB.renameEquipmentType(rid, val);
+      if (val) {
+        const res = DB.renameEquipmentType(rid, val);
+        if (res && res.merged) toast(`Mit bestehender Geräte-Art „${val}" zusammengeführt`);
+      }
       editingId = null; draw(m);
       cleanupAndRefresh();
     });
@@ -1169,7 +1380,7 @@ function manageEquipmentModal() {
 
 // Kleiner, gestapelter Dialog um schnell eine neue Muskelgruppe anzulegen
 // (z.B. direkt beim Taggen einer Übung, ohne den aktuellen Dialog zu verlassen).
-function quickAddMuscleGroup(onAdded) {
+function quickAddMuscleGroupModal(onAdded) {
   openModal({
     title: 'Neue Muskelgruppe',
     body: `<label class="field"><span>Name</span><input id="f-mgname" placeholder="z.B. Nacken" /></label>`,
@@ -1217,7 +1428,10 @@ function manageMuscleGroupsModal() {
     $$('[data-save]', listEl).forEach(b => b.onclick = () => {
       const rid = b.dataset.save;
       const val = $(`#f-mgrename-${rid}`, listEl).value.trim();
-      if (val) DB.renameMuscleGroup(rid, val);
+      if (val) {
+        const res = DB.renameMuscleGroup(rid, val);
+        if (res && res.merged) toast(`Mit bestehender Muskelgruppe „${val}" zusammengeführt`);
+      }
       editingId = null; draw(m);
       cleanupAndRefresh();
     });
@@ -1268,20 +1482,33 @@ let restTimer = null;
 let trainMode = null; // null | 'select' | 'reorder'
 const trainSelected = new Set(); // Entry-Indizes während der Zirkel-Auswahl
 
+// Der Container wird modulweit gehalten, nicht pro Render neu erzeugt: renderTrain/
+// renderEntries werden aus Modals und Callbacks heraus mit einer festen Container-
+// Referenz aufgerufen. Bei einem erneuten render() derselben Route (z.B. weil ein
+// Modal render() aufruft) hätte ein frischer Container die alten Referenzen ins
+// Leere laufen lassen - Klicks wären dann wirkungslos geblieben.
+let trainContainer = null;
+let trainContainerSessionId = null;
+
 route('/train/:id', ({ id }) => {
   const s = DB.getSession(id);
   if (!s) return navigate('/plans');
-  trainMode = null; trainSelected.clear();
-
-  const container = el('div');
-  renderTrain(container, id);
+  if (trainContainerSessionId !== id) {
+    trainMode = null; trainSelected.clear();
+    trainContainer = el('div');
+    trainContainerSessionId = id;
+  }
+  if (!trainContainer) trainContainer = el('div');
   appEl.innerHTML = '';
-  appEl.append(container);
+  appEl.append(trainContainer);
+  renderTrain(trainContainer, id);
 });
 
 // Alles rund um Training-Struktur (Zirkel, Reihenfolge, Übung hinzufügen, Farbe,
 // Trainingstag/Plan bearbeiten) gebündelt hinter einem "⚙️"-Button - hält die
 // eigentliche Trainingsansicht schlank (nur Name/Datum/Notiz + Übungen + Beenden).
+// Gegenstück zu daySettingsModal - die ersten Einträge sind bewusst identisch
+// benannt und identisch angeordnet, die trainingsspezifische Farbe steht danach.
 function trainSettingsModal(s, container, id) {
   const day = DB.getDay(s.dayId);
   const plan = DB.getPlan(s.planId);
@@ -1291,9 +1518,9 @@ function trainSettingsModal(s, container, id) {
       ${s.entries.length > 1 ? `<button class="sheet-btn" data-act="group">🔗 Zirkel erstellen</button>
       <button class="sheet-btn" data-act="reorder">↕ Reihenfolge anpassen</button>` : ''}
       <button class="sheet-btn" data-act="addex">➕ Übung hinzufügen</button>
-      <button class="sheet-btn" data-act="color">🎨 Farbe ändern</button>
       ${day ? '<button class="sheet-btn" data-act="editday">✏️ Trainingstag bearbeiten</button>' : ''}
       ${plan ? '<button class="sheet-btn" data-act="editplan">📋 Plan bearbeiten</button>' : ''}
+      <button class="sheet-btn" data-act="color">🎨 Farbe dieses Trainings</button>
     </div>`,
     footer: `<button class="btn ghost block" data-x>Schließen</button>`,
     onMount: (m, close) => {
@@ -1304,21 +1531,28 @@ function trainSettingsModal(s, container, id) {
       if (reorder) reorder.onclick = () => { close(); trainMode = 'reorder'; renderTrain(container, id); };
       $('[data-act="addex"]', m).onclick = () => {
         close();
-        pickExerciseModal(exId => {
-          const ex = DB.getExercise(exId);
+        const cur = DB.getSession(id);
+        if (!cur) return;
+        pickExercisesModal(exIds => {
           const s2 = DB.getSession(id);
+          if (!s2) return;
           const cfg = DB.db().settings;
-          const sets = [];
-          for (let i = 0; i < cfg.defaultSets; i++) sets.push({ weight: '', reps: '', done: false });
-          s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: cfg.defaultReps, targetSets: cfg.defaultSets, restSec: cfg.defaultRestSec, groupId: null, sets });
-          DB.save(); renderTrain(container, id);
-        }, s.entries.map(e => e.exerciseId));
+          exIds.forEach(exId => {
+            const ex = DB.getExercise(exId);
+            const sets = [];
+            for (let i = 0; i < cfg.defaultSets; i++) sets.push({ weight: '', reps: '', done: false });
+            s2.entries.push({ exerciseId: exId, name: ex ? ex.name : 'Übung', unit: ex?.unit || 'kg', targetReps: cfg.defaultReps, targetSets: cfg.defaultSets, restSec: cfg.defaultRestSec, groupId: null, sets });
+          });
+          DB.save();
+          toast(exIds.length > 1 ? `${exIds.length} Übungen hinzugefügt` : 'Übung hinzugefügt');
+          renderTrain(container, id);
+        }, cur.entries.map(e => e.exerciseId));
       };
-      $('[data-act="color"]', m).onclick = () => { close(); trainColorModal(s, container, id); };
       const editday = $('[data-act="editday"]', m);
       if (editday) editday.onclick = () => { close(); navigate('/day/' + s.dayId); };
       const editplan = $('[data-act="editplan"]', m);
       if (editplan) editplan.onclick = () => { close(); navigate('/plan/' + s.planId); };
+      $('[data-act="color"]', m).onclick = () => { close(); trainColorModal(s, container, id); };
     },
   });
 }
@@ -1367,7 +1601,7 @@ function renderTrain(container, id) {
     ${finished
       ? `<button class="btn primary block" id="reopenBtn">Als „laufend" markieren</button>`
       : `<button class="btn good block" id="finishBtn">✓ Training beenden</button>`}`}
-    <div style="height:${trainMode ? '70px' : '20px'}"></div>
+    <div style="height:20px"></div>
   `;
   container.innerHTML = html;
 
@@ -1448,19 +1682,22 @@ function isLastInGroup(entries, i) {
 
 function trainSelectCardHTML(entry, ei) {
   const isSel = trainSelected.has(ei);
+  // Gleicher Aufbau wie daySelectCardHTML: 🔗 für bereits gruppierte Übungen und
+  // die Satz-/Wdh.-Zeile darunter.
   return `<div class="card tap select-card ${isSel ? 'sel' : ''}" data-tsel="${ei}">
     <div style="display:flex;align-items:center;gap:10px">
       <div class="select-check ${isSel ? 'on' : ''}">${isSel ? '✓' : ''}</div>
-      <div class="grow"><b>${esc(entry.name)}</b></div>
+      <div class="grow"><b>${entry.groupId ? '🔗 ' : ''}${esc(entry.name)}</b>
+        <div class="tiny muted" style="margin-top:2px">${(entry.sets || []).length} Sätze × ${entry.targetReps || '–'} Wdh</div></div>
     </div>
   </div>`;
 }
-function trainReorderCardHTML(entry, ei, total) {
+function trainReorderCardHTML(entry, ei, list) {
+  const { canUp, canDown } = reorderBounds(list, ei);
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:8px">
       <div class="grow"><b>${entry.groupId ? '🔗 ' : ''}${esc(entry.name)}</b></div>
-      <span class="mv" data-tup="${ei}" style="padding:4px 8px;color:${ei === 0 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${ei === 0 ? 'none' : 'auto'}">▲</span>
-      <span class="mv" data-tdown="${ei}" style="padding:4px 8px;color:${ei === total - 1 ? 'var(--border)' : 'var(--text-dim2)'};pointer-events:${ei === total - 1 ? 'none' : 'auto'}">▼</span>
+      ${moveArrowsHTML(ei, canUp, canDown, ['tup', 'tdown'])}
     </div>
   </div>`;
 }
@@ -1475,6 +1712,8 @@ function renderEntries(container, id) {
   $$('.select-bar', container).forEach(b => b.remove());
 
   if (trainMode === 'select') {
+    // Gleicher Hinweistext wie im Trainingstag
+    wrap.innerHTML = `<p class="tiny muted" style="margin-top:0">Wähle 2 oder mehr Übungen, die als Zirkel ohne Pause dazwischen trainiert werden sollen.</p>`;
     s.entries.forEach((entry, ei) => { wrap.innerHTML += trainSelectCardHTML(entry, ei); });
     $$('[data-tsel]', wrap).forEach(n => n.onclick = () => {
       const idx = parseInt(n.dataset.tsel);
@@ -1490,8 +1729,15 @@ function renderEntries(container, id) {
       if (trainSelected.size < 2) return;
       const gid = DB.uid('grp');
       const orderedIdx = [...trainSelected];
+      // Identisch zu regroupContiguous in db.js: erst die alten Gruppen der
+      // Auswahl auflösen, sonst bleibt eine alte groupId auf Übungen liegen, die
+      // durch das Verschieben des neuen Blocks auseinandergerissen werden - die
+      // alte Gruppe wäre dann nicht mehr lückenlos und würde als zwei getrennte
+      // Zirkel-Kästen mit derselben Kennung gezeichnet (Pausenlogik inklusive).
+      DB.releaseOldGroups(s.entries, (e, i) => trainSelected.has(i));
       orderedIdx.forEach(idx => { if (s.entries[idx]) s.entries[idx].groupId = gid; });
       regroupByIndex(s.entries, orderedIdx);
+      DB.pruneLoneGroups(s.entries);
       DB.save();
       toast('Zirkel erstellt');
       trainMode = null; trainSelected.clear();
@@ -1501,7 +1747,8 @@ function renderEntries(container, id) {
   }
 
   if (trainMode === 'reorder') {
-    s.entries.forEach((entry, ei) => { wrap.innerHTML += trainReorderCardHTML(entry, ei, s.entries.length); });
+    wrap.innerHTML = `<p class="tiny muted" style="margin-top:0">Mit ▲/▼ die Reihenfolge der Übungen ändern. Zirkel-Übungen bewegen sich als Block.</p>`;
+    s.entries.forEach((entry, ei) => { wrap.innerHTML += trainReorderCardHTML(entry, ei, s.entries); });
     $$('[data-tup]', wrap).forEach(n => n.onclick = () => {
       reorderStep(s.entries, parseInt(n.dataset.tup), -1);
       DB.save(); renderEntries(container, id);
@@ -1514,6 +1761,14 @@ function renderEntries(container, id) {
     bar.innerHTML = `<button class="btn primary block" id="doneTrainReorderBtn">Fertig</button>`;
     container.append(bar);
     $('#doneTrainReorderBtn', bar).onclick = () => { trainMode = null; renderTrain(container, id); };
+    return;
+  }
+
+  if (!s.entries.length) {
+    // Gleicher Leerzustand wie im Trainingstag - kann auftreten, wenn im Training
+    // alle Übungen entfernt wurden.
+    wrap.innerHTML = `<div class="empty"><div class="big">📚</div><div>Keine Übungen in diesem Training.</div>
+      <div class="tiny" style="margin:8px 0 0">Über „⚙️ → ➕ Übung hinzufügen" welche aufnehmen.</div></div>`;
     return;
   }
 
@@ -1594,7 +1849,7 @@ function renderExerciseBlock(s, id, container, ei) {
     setsEl.append(row);
   });
 
-  $('[data-menu]', block).onclick = () => exerciseMenuModal(entry, !!noteRec, {
+  $('[data-menu]', block).onclick = () => trainExerciseMenuModal(entry, !!noteRec, {
     onAddSet: () => {
       const prev = entry.sets[entry.sets.length - 1];
       entry.sets.push({ weight: prev ? prev.weight : '', reps: prev ? prev.reps : '', done: false });
@@ -1606,8 +1861,11 @@ function renderExerciseBlock(s, id, container, ei) {
       if (DB.hasData(last) && !(await confirmDialog('Bereits eingetragenen Satz entfernen?', { danger: true, okText: 'Entfernen' }))) return;
       entry.sets.pop(); DB.save(); renderEntries(container, id);
     },
-    onRest: () => editRestModal(entry, () => renderEntries(container, id)),
-    onNote: () => editExerciseNoteModal(entry.exerciseId, s.locationId, () => renderEntries(container, id)),
+    onTargets: () => editTrainTargetsModal(entry, () => renderEntries(container, id)),
+    // Geräte-Notizen sind pro (Übung, Ort) gespeichert. Ohne Ort (Einheit eines
+    // gelöschten Orts) gibt es keinen sinnvollen Schlüssel - dann wird der
+    // Menüpunkt weggelassen statt eine Eingabe still zu verschlucken.
+    onNote: s.locationId ? () => editExerciseNoteModal(entry.exerciseId, s.locationId, () => renderEntries(container, id)) : null,
     onReplace: () => pickExerciseModal(exId => {
       const newEx = DB.getExercise(exId);
       // Ziel-Satzanzahl beibehalten (nicht auf 1 zurücksetzen) - nur die eingetragenen
@@ -1617,41 +1875,49 @@ function renderExerciseBlock(s, id, container, ei) {
       entry.name = newEx ? newEx.name : 'Übung';
       entry.unit = newEx?.unit || 'kg';
       entry.sets = Array.from({ length: setCount }, () => ({ weight: '', reps: '', done: false }));
-      DB.save(); renderEntries(container, id);
+      DB.save();
+      toast('Übung ersetzt');
+      renderEntries(container, id);
     }, s.entries.filter((e2, i2) => i2 !== ei).map(e2 => e2.exerciseId)),
     onRemoveExercise: async () => {
       if (await confirmDialog('Übung aus diesem Training entfernen?', { danger: true, okText: 'Entfernen' })) {
-        s.entries.splice(ei, 1); DB.save(); renderEntries(container, id);
+        s.entries.splice(ei, 1);
+        DB.pruneLoneGroups(s.entries); // sonst bleibt ein Zirkel mit nur einer Übung stehen
+        DB.save();
+        toast('Übung entfernt');
+        renderEntries(container, id);
       }
     },
   });
   return block;
 }
 
-// Kompaktes Aktions-Menü für eine Übung im laufenden Training (ersetzt die
-// vorherigen Einzel-Buttons für Pause/Löschen -> schlankerer Übungskopf).
-function exerciseMenuModal(entry, hasNote, actions) {
+// Aktions-Menü einer Übung im laufenden Training - Gegenstück zu
+// dayExerciseMenuModal. Die letzten drei Einträge (Ersetzen / Notiz / Entfernen)
+// sind absichtlich in beiden Ansichten identisch benannt und angeordnet.
+function trainExerciseMenuModal(entry, hasNote, actions) {
   openModal({
     title: entry.name,
     body: `<div class="sheet">
-      <button class="sheet-btn" data-act="rest">⏱ Pause ändern <span class="tiny muted">(aktuell ${entry.restSec}s)</span></button>
+      <button class="sheet-btn" data-act="targets">🎯 Zielwerte ändern <span class="tiny muted">(${entry.targetReps || '–'} Wdh., Pause ${entry.restSec}s)</span></button>
       <div class="sheet-btn split">
         <button class="split-half" data-act="rmset" aria-label="Letzten Satz entfernen">−</button>
         <span class="split-label">Satz <span class="tiny muted">(${entry.sets.length})</span></span>
         <button class="split-half" data-act="addset" aria-label="Satz hinzufügen">＋</button>
       </div>
       <button class="sheet-btn" data-act="replace">🔄 Übung ersetzen</button>
-      <button class="sheet-btn" data-act="note">📝 ${hasNote ? 'Notiz bearbeiten' : 'Notiz hinzufügen'}</button>
+      ${actions.onNote ? `<button class="sheet-btn" data-act="note">📝 ${hasNote ? 'Notiz bearbeiten' : 'Notiz hinzufügen'}</button>` : ''}
       <button class="sheet-btn danger" data-act="remove">🗑️ Übung aus Training entfernen</button>
     </div>`,
     footer: `<button class="btn ghost block" data-x>Abbrechen</button>`,
     onMount: (m, close) => {
       $('[data-x]', m).onclick = close;
-      $('[data-act="rest"]', m).onclick = () => { close(); actions.onRest(); };
+      $('[data-act="targets"]', m).onclick = () => { close(); actions.onTargets(); };
       $('[data-act="addset"]', m).onclick = () => { close(); actions.onAddSet(); };
       $('[data-act="rmset"]', m).onclick = () => { close(); actions.onRemoveSet(); };
       $('[data-act="replace"]', m).onclick = () => { close(); actions.onReplace(); };
-      $('[data-act="note"]', m).onclick = () => { close(); actions.onNote(); };
+      const note = $('[data-act="note"]', m);
+      if (note) note.onclick = () => { close(); actions.onNote(); };
       $('[data-act="remove"]', m).onclick = () => { close(); actions.onRemoveExercise(); };
     },
   });
@@ -1677,22 +1943,35 @@ function editExerciseNoteModal(exerciseId, locationId, after) {
   });
 }
 
-function editRestModal(entry, after) {
+// Zielwerte einer Übung im laufenden Training - Gegenstück zu
+// editDayExerciseModal im Trainingstag. Die Satzanzahl fehlt hier bewusst: die
+// wird im Training über die ±-Zeile des ⋮-Menüs geändert, weil dort echte
+// Satzzeilen mit Gewicht/Wdh. angelegt bzw. entfernt werden müssen.
+function editTrainTargetsModal(entry, after) {
   openModal({
-    title: 'Pausenzeit',
-    body: `<label class="field"><span>Pause zwischen den Sätzen (Sekunden)</span>
-      <input id="f-rest" type="number" inputmode="numeric" min="0" step="5" value="${entry.restSec}" /></label>
+    title: entry.name,
+    body: `
+      <div class="row2">
+        <label class="field"><span>Ziel-Wdh.</span><input id="f-reps" type="number" inputmode="numeric" min="1" value="${esc(entry.targetReps ?? '')}" /></label>
+        <label class="field"><span>Pause (s)</span><input id="f-rest" type="number" inputmode="numeric" min="0" step="5" value="${entry.restSec}" /></label>
+      </div>
       <div class="btn-row">
         <button class="btn sm" data-preset="60">60s</button>
         <button class="btn sm" data-preset="90">90s</button>
         <button class="btn sm" data-preset="120">120s</button>
         <button class="btn sm" data-preset="180">180s</button>
-      </div>`,
+      </div>
+      <p class="tiny muted" style="margin:10px 0 0">Die Ziel-Wdh. erscheinen als Platzhalter in den Satzzeilen. Beim Beenden kannst du die Änderung in den Trainingstag übernehmen.</p>`,
     footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button>`,
     onMount: (m, close) => {
       $$('[data-preset]', m).forEach(b => b.onclick = () => { $('#f-rest', m).value = b.dataset.preset; });
       $('[data-x]', m).onclick = close;
-      $('[data-ok]', m).onclick = () => { entry.restSec = Math.max(0, parseInt($('#f-rest', m).value) || 0); DB.save(); close(); after && after(); };
+      $('[data-ok]', m).onclick = () => {
+        const reps = parseInt($('#f-reps', m).value);
+        entry.targetReps = reps > 0 ? reps : entry.targetReps;
+        entry.restSec = Math.max(0, parseInt($('#f-rest', m).value) || 0);
+        DB.save(); close(); after && after();
+      };
     },
   });
 }
@@ -1817,9 +2096,11 @@ function beep() {
   if (navigator.vibrate) { try { navigator.vibrate([200, 80, 200]); } catch (e) { /* ignore */ } }
 }
 
+// Quittiert wie alle anderen Löschwege (removeExerciseFromDay, deleteCardioSession)
+// Quittiert wie alle anderen Löschwege (discardCardioSession, Übung entfernen)
 function discardSession(id) {
   confirmDialog('Dieses Training verwerfen und löschen?', { danger: true, okText: 'Verwerfen' }).then(ok => {
-    if (ok) { DB.deleteSession(id); stopRest(); navigate('/plans'); }
+    if (ok) { DB.deleteSession(id); stopRest(); toast('Training verworfen'); navigate('/plans'); }
   });
 }
 
@@ -1861,7 +2142,7 @@ route('/cardio', () => {
   html += `<details class="stats-acc" data-acc="plans" ${cardioStatsAccOpen.plans ? 'open' : ''}><summary>Kardio-Pläne</summary>`;
   if (!plans.length) {
     html += `<div class="empty"><div class="big">🏃</div><div>Noch keine Kardio-Pläne.</div>
-      <div class="tiny" style="margin:8px 0 0">Tippe unten auf „＋".</div></div>`;
+      <div class="tiny" style="margin:8px 0 0">Tippe oben rechts auf „➕".</div></div>`;
   } else {
     plans.forEach(p => { html += cardioPlanAccHTML(p); });
   }
@@ -2024,15 +2305,14 @@ route('/cardio-plan/:id', ({ id }) => {
     html += `<div class="empty"><div class="big">🏃</div><div>Noch keine Trainingstage.</div>
       <div class="tiny" style="margin:8px 0 0">Ein Trainingstag ist z.B. „Grundlagenausdauer" oder „Intervalle".</div></div>`;
   } else {
-    days.forEach(day => {
+    days.forEach((day, i) => {
       html += `<div class="list-row" data-cday-manage="${day.id}">
         <div class="chip" style="background:${esc(day.color)}22;color:${esc(day.color)}">${esc(day.emoji)}</div>
         <div class="grow"><div class="r-title">${esc(day.name)}</div>
           <div class="r-sub">${day.activities.length} Gerät(e)</div></div>
         <button class="btn ghost sm" data-cstats-day="${day.id}" title="Statistik">📈</button>
         <button class="btn good sm" data-clog="${day.id}" title="Werte eintragen">📝</button>
-        <span class="mv" data-up="${day.id}" style="padding:4px 8px;color:var(--text-dim2)">▲</span>
-        <span class="mv" data-down="${day.id}" style="padding:4px 8px;color:var(--text-dim2)">▼</span></div>`;
+        ${moveArrowsHTML(day.id, i > 0, i < days.length - 1)}</div>`;
     });
   }
   appEl.innerHTML = html;
@@ -2078,8 +2358,14 @@ route('/cardio-day/:id', ({ id }) => {
   if (!day) return navigate('/cardio');
   const plan = DB.getCardioPlan(day.planId);
 
+  const addEquipments = () => pickCardioEquipmentsModal(names => {
+    names.forEach(name => DB.addEquipmentToCardioDay(id, name));
+    toast(names.length > 1 ? `${names.length} Geräte hinzugefügt` : 'Gerät hinzugefügt');
+    draw();
+  });
+
   function draw() {
-    setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: [actionBtn('➕', () => pickCardioEquipmentModal(equipment => { DB.addEquipmentToCardioDay(id, equipment); draw(); })), actionBtn('📈', () => navigate('/cardio-stats-day/' + id)), actionBtn('✏️', () => editCardioDayModal(id, day.planId))] });
+    setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: [actionBtn('➕', addEquipments), actionBtn('📈', () => navigate('/cardio-stats-day/' + id)), actionBtn('✏️', () => editCardioDayModal(id, day.planId))] });
     let html = `${plan ? `<div class="tiny muted" style="margin:-2px 0 10px">${esc(plan.emoji)} ${esc(plan.name)}</div>` : ''}`;
     html += `<button class="btn good block" id="logBtn" style="margin-bottom:16px">📝 Werte eintragen</button>`;
     html += `<div class="section-title">Geräte</div>`;
@@ -2102,37 +2388,59 @@ route('/cardio-day/:id', ({ id }) => {
     }
     appEl.innerHTML = html;
     $('#logBtn', appEl).onclick = () => { if (!day.activities.length) return toast('Erst Geräte hinzufügen'); navigate('/cardio-log/' + id); };
-    $$('[data-up]', appEl).forEach(n => n.onclick = () => { DB.moveCardioDayActivity(id, n.dataset.up, -1); draw(); });
-    $$('[data-down]', appEl).forEach(n => n.onclick = () => { DB.moveCardioDayActivity(id, n.dataset.down, 1); draw(); });
+    $$('[data-up]', appEl).forEach(n => n.onclick = () => { DB.moveEquipmentInCardioDay(id, n.dataset.up, -1); draw(); });
+    $$('[data-down]', appEl).forEach(n => n.onclick = () => { DB.moveEquipmentInCardioDay(id, n.dataset.down, 1); draw(); });
     $$('[data-rm]', appEl).forEach(n => n.onclick = async () => {
-      if (await confirmDialog('Gerät aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) { DB.removeCardioDayActivity(id, n.dataset.rm); draw(); }
+      if (await confirmDialog('Gerät aus diesem Trainingstag entfernen?', { danger: true, okText: 'Entfernen' })) { DB.removeEquipmentFromCardioDay(id, n.dataset.rm); draw(); }
     });
   }
   draw();
 });
 
 // ---------- Kardio-Geräte-Auswahl (zum Hinzufügen zu einem Trainingstag) ----------
-function pickCardioEquipmentModal(onPick) {
+// Mehrfachauswahl per Häkchen, genau wie pickExercisesModal beim Krafttraining -
+// gleiche Bedienung, gleiche Beschriftung ("Hinzufügen (n)").
+function pickCardioEquipmentsModal(onPickMany) {
   const list = DB.cardioEquipmentTypes();
+  // Auswahl-Reihenfolge als Array: Geräte werden in Antipp-Reihenfolge übernommen.
+  const picked = [];
   const body = `
     <input id="f-search" placeholder="Gerät suchen …" style="margin-bottom:10px" />
     <button class="btn primary block" id="newEq" style="margin-bottom:12px">+ Neues Gerät anlegen</button>
     <div id="eqPickList"></div>`;
   openModal({
-    title: 'Gerät wählen',
+    title: 'Geräte wählen',
     body,
+    footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn primary" data-ok disabled>Hinzufügen</button>`,
     onMount: (m, close) => {
       const listEl = $('#eqPickList', m);
+      const okBtn = $('[data-ok]', m);
+      const syncOk = () => {
+        okBtn.disabled = !picked.length;
+        okBtn.textContent = picked.length ? `Hinzufügen (${picked.length})` : 'Hinzufügen';
+      };
       const draw = (q = '') => {
         const items = list.filter(eq => !q || eq.name.toLowerCase().includes(q.toLowerCase()));
-        listEl.innerHTML = items.length ? items.map(eq => `<div class="list-row" data-pick="${esc(eq.name)}">
-            <div class="grow"><div class="r-title">${esc(eq.name)}</div></div>
-            <span class="arrow">＋</span></div>`).join('') : `<div class="tiny muted center" style="padding:12px">Kein Gerät gefunden.</div>`;
-        $$('[data-pick]', listEl).forEach(n => n.onclick = () => { close(); onPick(n.dataset.pick); });
+        listEl.innerHTML = items.length ? items.map(eq => {
+          const sel = picked.indexOf(eq.name) >= 0;
+          return `<div class="list-row select-card ${sel ? 'sel' : ''}" data-pick="${esc(eq.name)}">
+            <div class="select-check ${sel ? 'on' : ''}">${sel ? '✓' : ''}</div>
+            <div class="grow"><div class="r-title">${esc(eq.name)}</div></div></div>`;
+        }).join('') : `<div class="tiny muted center" style="padding:12px">Kein Gerät gefunden.</div>`;
+        $$('[data-pick]', listEl).forEach(n => n.onclick = () => {
+          const name = n.dataset.pick;
+          const at = picked.indexOf(name);
+          if (at >= 0) picked.splice(at, 1); else picked.push(name);
+          draw($('#f-search', m).value);
+          syncOk();
+        });
       };
       draw();
+      syncOk();
       $('#f-search', m).oninput = e => draw(e.target.value);
-      $('#newEq', m).onclick = () => { close(); quickAddCardioEquipmentModal(name => onPick(name)); };
+      $('[data-x]', m).onclick = close;
+      okBtn.onclick = () => { if (!picked.length) return; close(); onPickMany(picked.slice()); };
+      $('#newEq', m).onclick = () => { close(); quickAddCardioEquipmentModal(name => onPickMany([...picked, name])); };
     },
   });
 }
@@ -2174,13 +2482,16 @@ function manageCardioEquipmentModal() {
         <button class="btn ghost sm" data-rename="${e.id}">✏️</button>
         <button class="btn ghost sm" data-del="${e.id}">🗑️</button>
       </div>`;
-    }).join('') : `<div class="tiny muted center" style="padding:10px">Noch keine Geräte-Arten.</div>`;
+    }).join('') : `<div class="tiny muted center" style="padding:10px">Noch keine Kardio-Geräte.</div>`;
     $$('[data-rename]', listEl).forEach(b => b.onclick = () => { editingId = b.dataset.rename; draw(m); });
     $$('[data-cancel]', listEl).forEach(b => b.onclick = () => { editingId = null; draw(m); });
     $$('[data-save]', listEl).forEach(b => b.onclick = () => {
       const rid = b.dataset.save;
       const val = $(`#f-rename-${rid}`, listEl).value.trim();
-      if (val) DB.renameCardioEquipment(rid, val);
+      if (val) {
+        const res = DB.renameCardioEquipment(rid, val);
+        if (res && res.merged) toast(`Mit bestehendem Gerät „${val}" zusammengeführt`);
+      }
       editingId = null; draw(m); render();
     });
     $$('[data-del]', listEl).forEach(b => b.onclick = async () => {
@@ -2261,8 +2572,16 @@ let cardioLogDraft = null; // {dayId, date, note, entries} - rein im Speicher, e
 route('/cardio-log/:dayId', ({ dayId }) => {
   const day = DB.getCardioDay(dayId);
   if (!day) return navigate('/cardio');
-  if (!cardioLogDraft || cardioLogDraft.dayId !== dayId) {
-    cardioLogDraft = { dayId, date: DB.todayISO(), note: '', entries: DB.cardioEntryTemplate(dayId) };
+  // Entwurf nur weiterverwenden, wenn er noch zum Trainingstag passt. Wurden
+  // zwischenzeitlich Geräte hinzugefügt/entfernt/umbenannt, wäre der Entwurf
+  // gegen die Geräteliste verschoben - die eingetragenen Werte landeten dann beim
+  // falschen Gerät.
+  const tpl = DB.cardioEntryTemplate(dayId) || [];
+  const draftFits = cardioLogDraft && cardioLogDraft.dayId === dayId
+    && (cardioLogDraft.entries || []).length === tpl.length
+    && (cardioLogDraft.entries || []).every((e, i) => e.equipment === tpl[i].equipment);
+  if (!draftFits) {
+    cardioLogDraft = { dayId, date: DB.todayISO(), note: '', entries: tpl };
   }
   const draft = cardioLogDraft;
   setChrome({ title: `${day.emoji} ${day.name}`, back: true, actions: [] });
@@ -2469,7 +2788,7 @@ function drawCalendar() {
   appEl.innerHTML = `
     <div class="streak-row">
       <div class="stat-tile"><div class="v">🔥 ${streak}</div><div class="l">Streak (Wochen)</div></div>
-      <div class="stat-tile"><div class="v">${monthCount}</div><div class="l">diesen Monat</div></div>
+      <div class="stat-tile"><div class="v">${monthCount}</div><div class="l">${esc(MONTHS[m])} ${y}</div></div>
       <div class="stat-tile"><div class="v">${totalSessions}</div><div class="l">gesamt</div></div>
     </div>
     <div class="card">
@@ -2488,7 +2807,7 @@ function drawCalendar() {
   $('[data-next]', appEl).onclick = () => { calState.m++; if (calState.m > 11) { calState.m = 0; calState.y++; } drawCalendar(); };
   $$('[data-date]', appEl).forEach(n => n.onclick = () => {
     const evs = byDate[n.dataset.date]; if (!evs || !evs.length) return;
-    dayDetailModal(n.dataset.date, evs);
+    calendarDayModal(n.dataset.date, evs);
   });
 
   const RECENT_COLLAPSED_COUNT = 3;
@@ -2546,7 +2865,7 @@ function isoWeekKey(d) {
   return `${date.getUTCFullYear()}-W${week}`;
 }
 
-function dayDetailModal(dateKey, evs) {
+function calendarDayModal(dateKey, evs) {
   openModal({
     title: fmtDate(dateKey),
     body: evs.map(e => `<div class="list-row" data-open="${e.sessionId}">
@@ -3056,7 +3375,7 @@ route('/settings', () => {
     const text = await file.text();
     const mode = await pickImportModeModal();
     if (mode) {
-      try { DB.importData(text, mode); toast('Import erfolgreich'); applyDisplaySettings(); render(); }
+      try { DB.importData(text, mode); resetExerciseFilter(); toast('Import erfolgreich'); applyDisplaySettings(); render(); }
       catch (e) { toast('Import fehlgeschlagen: ' + e.message); }
     }
     impFile.value = '';
@@ -3093,7 +3412,7 @@ route('/settings', () => {
   };
   $('#wipeBtn', appEl).onclick = async () => {
     if (await confirmDialog('Wirklich ALLE Daten unwiderruflich löschen?', { danger: true, okText: 'Alles löschen' })) {
-      DB.wipeAll(); applyDisplaySettings(); toast('Alle Daten gelöscht'); navigate('/plans');
+      DB.wipeAll(); resetExerciseFilter(); applyDisplaySettings(); toast('Alle Daten gelöscht'); navigate('/plans');
     }
   };
 });

@@ -149,8 +149,14 @@ export function deleteExercise(id) {
   const ex = d.exercises.find(e => e.id === id);
   if (!ex) return;
   d.exercises = d.exercises.filter(e => e.id !== id);
-  d.days.forEach(day => { day.exercises = day.exercises.filter(x => x.exerciseId !== id); });
-  d.exerciseNotes = d.exerciseNotes.filter(n => n.exerciseId !== id);
+  d.days.forEach(day => {
+    day.exercises = day.exercises.filter(x => x.exerciseId !== id);
+    pruneLoneGroups(day.exercises);
+  });
+  // Geräte-Notizen bleiben bewusst erhalten, solange die Übung nur im Papierkorb
+  // liegt - sonst wäre die Wiederherstellung nur eine halbe (Notizen für alle
+  // Orte wären unwiederbringlich weg). Endgültig entfernt werden sie in
+  // purgeTrashedExercise/emptyTrash.
   d.trashExercises.push({ ...ex, deletedAt: Date.now() });
   save();
 }
@@ -161,16 +167,32 @@ export function restoreExercise(id) {
   if (!ex) return null;
   d.trashExercises = d.trashExercises.filter(e => e.id !== id);
   const { deletedAt, ...restored } = ex;
-  d.exercises.push(restored);
+  // Existiert die id schon in der Live-Liste (z.B. nach einem Zusammenführen-
+  // Import, der den Papierkorb-Eintrag erneut eingespielt hat), nur aus dem
+  // Papierkorb nehmen statt eine zweite Kopie mit gleicher id anzulegen.
+  const already = d.exercises.some(e => e.id === restored.id);
+  if (!already) d.exercises.push(restored);
   save();
   return restored;
 }
 export function purgeTrashedExercise(id) {
-  const d = db(); d.trashExercises = d.trashExercises.filter(e => e.id !== id); save();
+  const d = db();
+  d.trashExercises = d.trashExercises.filter(e => e.id !== id);
+  // Erst jetzt ist die Übung endgültig weg - hier gehören auch ihre
+  // ortsbezogenen Geräte-Notizen entsorgt (deleteExercise behält sie, damit
+  // eine Wiederherstellung vollständig ist).
+  if (!d.exercises.some(e => e.id === id) && !d.trashExercises.some(e => e.id === id)) {
+    d.exerciseNotes = d.exerciseNotes.filter(n => n.exerciseId !== id);
+  }
+  save();
 }
-// Wie oft wurde eine Übung in Einheiten genutzt (für Löschwarnung)
+// Wie oft wurde eine Übung in ABGESCHLOSSENEN Einheiten wirklich trainiert
+// (für Löschwarnung und die "X× trainiert"-Zeile in der Bibliothek). Gleiche
+// Bedingung wie in allen Statistik-Funktionen: ohne finishedAt und ohne
+// abgehakten Satz existiert zu der Übung auch keine Statistik.
 export function exerciseUsage(id) {
-  return db().sessions.filter(s => (s.entries || []).some(e => e.exerciseId === id)).length;
+  return db().sessions.filter(s => s.finishedAt
+    && (s.entries || []).some(e => e.exerciseId === id && (e.sets || []).some(isWorkingDone))).length;
 }
 
 // ---------- Dauerhafte Geräte-/Einstellungs-Notiz je Übung + Ort ----------
@@ -208,16 +230,27 @@ export function addMuscleGroup(name) {
   db().muscleGroups.push(m); save(); return m;
 }
 export function renameMuscleGroup(id, newName) {
-  newName = String(newName || '').trim(); if (!newName) return;
-  const m = getMuscleGroup(id); if (!m) return;
+  newName = String(newName || '').trim(); if (!newName) return null;
+  const m = getMuscleGroup(id); if (!m) return null;
   const oldName = m.name;
-  m.name = newName;
-  if (oldName !== newName) {
-    db().exercises.forEach(ex => {
-      if ((ex.muscles || []).includes(oldName)) ex.muscles = ex.muscles.map(x => x === oldName ? newName : x);
-    });
+  if (oldName === newName) return { merged: false };
+  // Zielname existiert schon (andere id)? Dann ZUSAMMENFÜHREN statt ein zweites
+  // Tag mit identischem Namen anzulegen - zwei gleichnamige Muskelgruppen würden
+  // sonst dieselbe Übung doppelt in das Muskel-Volumen einrechnen.
+  const clash = db().muscleGroups.find(x => x.id !== id && x.name.toLowerCase() === newName.toLowerCase());
+  db().exercises.forEach(ex => {
+    if (!(ex.muscles || []).includes(oldName)) return;
+    // Set-Semantik: nach dem Umbenennen darf der Name nicht zweimal in einer
+    // Übung stehen (falls sie vorher beide Tags trug).
+    ex.muscles = [...new Set(ex.muscles.map(x => x === oldName ? newName : x))];
+  });
+  if (clash) {
+    db().muscleGroups = db().muscleGroups.filter(x => x.id !== id);
+  } else {
+    m.name = newName;
   }
   save();
+  return { merged: !!clash };
 }
 export function deleteMuscleGroup(id) {
   const m = getMuscleGroup(id); if (!m) return;
@@ -241,14 +274,20 @@ export function addEquipmentType(name) {
   db().equipmentTypes.push(e); save(); return e;
 }
 export function renameEquipmentType(id, newName) {
-  newName = String(newName || '').trim(); if (!newName) return;
-  const e = getEquipmentType(id); if (!e) return;
+  newName = String(newName || '').trim(); if (!newName) return null;
+  const e = getEquipmentType(id); if (!e) return null;
   const oldName = e.name;
-  e.name = newName;
-  if (oldName !== newName) {
-    db().exercises.forEach(ex => { if (ex.equipment === oldName) ex.equipment = newName; });
+  if (oldName === newName) return { merged: false };
+  // Wie renameMuscleGroup: bei Namensgleichheit zusammenführen statt duplizieren.
+  const clash = db().equipmentTypes.find(x => x.id !== id && x.name.toLowerCase() === newName.toLowerCase());
+  db().exercises.forEach(ex => { if (ex.equipment === oldName) ex.equipment = newName; });
+  if (clash) {
+    db().equipmentTypes = db().equipmentTypes.filter(x => x.id !== id);
+  } else {
+    e.name = newName;
   }
   save();
+  return { merged: !!clash };
 }
 export function deleteEquipmentType(id) {
   const e = getEquipmentType(id); if (!e) return;
@@ -310,19 +349,75 @@ export function deletePlan(id) {
   save();
 }
 
-// Kopiert einen Plan (mit allen Trainingstagen & Zielwerten) als unabhängige
-// Kopie an einen anderen Ort. Übungen werden dabei NICHT dupliziert -
-// die Bibliothek ist ortübergreifend gemeinsam (jedes Gym hat z.B. eine
-// Brustpresse), nur die Statistik/das "letztes Mal" bleibt je Ort getrennt.
-// Die Kopie ist danach vollständig unabhängig vom Original editierbar.
+// ---------- Kopieren (Plan / einzelner Trainingstag) ----------
+// Übungen werden beim Kopieren NICHT dupliziert - die Bibliothek ist
+// ortübergreifend gemeinsam (jedes Gym hat z.B. eine Brustpresse), nur die
+// Statistik/das "letztes Mal" bleibt je Ort getrennt. Die Kopie ist danach
+// vollständig unabhängig vom Original editierbar.
+
+// Überträgt die Übungen eines Trainingstags in einen anderen Trainingstag.
+// Zirkel-Gruppen werden dabei auf FRISCHE groupIds abgebildet: die alte id des
+// Originals darf nicht mitgeschleppt werden, sonst teilen Original und Kopie
+// dieselbe Gruppen-Kennung.
+function copyDayExercisesInto(srcDay, targetDayId) {
+  const gidMap = new Map();
+  srcDay.exercises.forEach(item => {
+    let groupId = null;
+    if (item.groupId) {
+      if (!gidMap.has(item.groupId)) gidMap.set(item.groupId, uid('grp'));
+      groupId = gidMap.get(item.groupId);
+    }
+    addExerciseToDay(targetDayId, item.exerciseId, { sets: item.sets, reps: item.reps, restSec: item.restSec, groupId });
+  });
+}
+
+// Herkunfts-Zusatz für kopierte Namen. Beim ganzen Plan reicht der Ort (der
+// Planname selbst steht ja im kopierten Plan), beim einzelnen Trainingstag
+// braucht es zusätzlich den Quell-Plan, um die Herkunft eindeutig zu machen.
+function copySuffix(parts) {
+  const named = parts.filter(Boolean).map(stripCopySuffix);
+  return named.length ? ` (Kopie aus ${named.join(', ')})` : ' (Kopie)';
+}
+
+// Entfernt einen bereits vorhandenen Herkunfts-Zusatz. Ohne das würden sich
+// Zusätze beim Kopieren einer Kopie aufschaukeln - z.B. "Push (Kopie aus
+// Zuhause, PPL (Kopie aus Kiel))". Der Zusatz nennt immer nur die unmittelbare
+// Herkunft, das ist die Information, die zählt.
+function stripCopySuffix(name) {
+  const s = String(name ?? '');
+  const cut = s.replace(/\s*\((?:Kopie|Kopie aus [^()]*)\)\s*$/, '').trim();
+  return cut || s;
+}
+
+// Kopiert einen Plan inkl. aller Trainingstage an einen (anderen) Ort.
 export function copyPlanToLocation(planId, targetLocationId) {
   const p = getPlan(planId); if (!p) return null;
-  const newPlan = addPlan({ name: p.name, emoji: p.emoji, color: p.color, locationId: targetLocationId });
+  const srcLoc = getLocation(p.locationId);
+  const newPlan = addPlan({
+    name: stripCopySuffix(p.name) + copySuffix([srcLoc?.name]),
+    emoji: p.emoji, color: p.color, locationId: targetLocationId,
+  });
   daysByPlan(planId).forEach(day => {
+    // Trainingstage behalten ihren Namen - der kopierte Plan trägt den
+    // Herkunftshinweis schon selbst.
     const newDay = addDay({ name: day.name, emoji: day.emoji, color: day.color, planId: newPlan.id });
-    day.exercises.forEach(item => addExerciseToDay(newDay.id, item.exerciseId, { sets: item.sets, reps: item.reps, restSec: item.restSec, groupId: item.groupId || null }));
+    copyDayExercisesInto(day, newDay.id);
   });
   return newPlan;
+}
+
+// Kopiert einen einzelnen Trainingstag in einen (auch denselben) Plan.
+export function copyDayToPlan(dayId, targetPlanId) {
+  const day = getDay(dayId); if (!day) return null;
+  if (!getPlan(targetPlanId)) return null;
+  const srcPlan = getPlan(day.planId);
+  const srcLoc = srcPlan ? getLocation(srcPlan.locationId) : null;
+  const newDay = addDay({
+    name: stripCopySuffix(day.name) + copySuffix([srcLoc?.name, srcPlan?.name]),
+    emoji: day.emoji, color: day.color, planId: targetPlanId,
+  });
+  copyDayExercisesInto(day, newDay.id);
+  return newDay;
 }
 
 // ---------- Trainingstage ----------
@@ -354,9 +449,11 @@ export function updateDayExercise(dayId, itemId, patch) {
   const it = day.exercises.find(x => x.id === itemId); if (it) { Object.assign(it, patch); save(); }
   return it;
 }
-export function removeDayExercise(dayId, itemId) {
+export function removeExerciseFromDay(dayId, itemId) {
   const day = getDay(dayId); if (!day) return;
-  day.exercises = day.exercises.filter(x => x.id !== itemId); save();
+  day.exercises = day.exercises.filter(x => x.id !== itemId);
+  pruneLoneGroups(day.exercises);
+  save();
 }
 
 // ---------- Supersätze/Zirkel (mehrere Übungen zu einer Gruppe verbinden) ----------
@@ -364,6 +461,36 @@ export function removeDayExercise(dayId, itemId) {
 // (in der ursprünglichen relativen Reihenfolge der Auswahl) - ein Zirkel
 // muss lückenlos hintereinander stehen, sonst ergibt "keine Pause dazwischen"
 // keinen Sinn.
+//
+// Die beiden folgenden Helfer sichern genau diese Invariante ab und arbeiten
+// deshalb bewusst auf JEDER Liste mit groupId - sowohl auf Trainingstag-Übungen
+// als auch auf Session-Entries des laufenden Trainings. So gilt in beiden
+// Ansichten dieselbe Regel, statt sie zweimal unterschiedlich zu implementieren.
+
+// Ein Zirkel braucht mindestens zwei Mitglieder. Bleibt nur noch eines übrig,
+// wird die Gruppenkennung entfernt - sonst zeichnet die UI einen "Zirkel"-Kasten
+// um eine einzelne Übung, und der Plan-Diff kann ihn nie mehr auflösen (groupsOf
+// blendet Gruppen mit nur einem Mitglied aus).
+export function pruneLoneGroups(list) {
+  const count = new Map();
+  list.forEach(x => { if (x.groupId) count.set(x.groupId, (count.get(x.groupId) || 0) + 1); });
+  list.forEach(x => { if (x.groupId && count.get(x.groupId) < 2) x.groupId = null; });
+}
+
+// Vor dem Neu-Gruppieren: Mitglieder der ALTEN Gruppen, die nicht mitausgewählt
+// wurden, verlieren ihre Gruppenkennung. Ohne das bliebe die alte groupId auf
+// Übungen liegen, die durch das Verschieben des neuen Blocks auseinander-
+// gerissen werden - die alte Gruppe wäre dann nicht mehr lückenlos und würde als
+// zwei getrennte Zirkel-Kästen mit derselben Kennung gezeichnet.
+// Bewusst NICHT umgekehrt gelöst (Restmitglieder in die neue Gruppe ziehen):
+// das würde ungefragt Übungen in den Zirkel aufnehmen, die nicht gewählt wurden.
+export function releaseOldGroups(list, isSelected) {
+  const oldGids = new Set();
+  list.forEach((x, i) => { if (isSelected(x, i) && x.groupId) oldGids.add(x.groupId); });
+  if (!oldGids.size) return;
+  list.forEach((x, i) => { if (!isSelected(x, i) && x.groupId && oldGids.has(x.groupId)) x.groupId = null; });
+}
+
 // Kernlogik ohne save() (wird auch beim Übernehmen von Trainings-Diffs wiederverwendet).
 function regroupContiguous(day, itemIds) {
   if (itemIds.length < 2) return null;
@@ -372,6 +499,7 @@ function regroupContiguous(day, itemIds) {
   // Reihenfolge der Auswahl beibehalten (nicht die alte Listenreihenfolge)
   const selected = itemIds.map(id => day.exercises.find(x => x.id === id)).filter(Boolean);
   if (selected.length < 2) return null;
+  releaseOldGroups(day.exercises, x => idSet.has(x.id));
   selected.forEach(item => { item.groupId = groupId; });
   // Block an die Position des ersten ausgewählten Elements verschieben,
   // alle anderen Elemente behalten ihre relative Reihenfolge.
@@ -380,6 +508,7 @@ function regroupContiguous(day, itemIds) {
   const insertAtInOthers = day.exercises.slice(0, insertAt).filter(x => !idSet.has(x.id)).length;
   others.splice(insertAtInOthers, 0, ...selected);
   day.exercises = others;
+  pruneLoneGroups(day.exercises);
   return groupId;
 }
 export function groupExercises(dayId, itemIds) {
@@ -436,7 +565,7 @@ export function startSession(dayId) {
     entries,
     // Schnappschuss des Plans zum Trainingsstart -> Basis für den Diff beim Beenden
     // (Trainingstag könnte sich zwischenzeitlich ändern oder gelöscht werden).
-    planSnapshot: day.exercises.map(item => ({ exerciseId: item.exerciseId, sets: item.sets, reps: item.reps, restSec: item.restSec, groupId: item.groupId || null })),
+    planSnapshot: planSnapshotOf(day),
   };
   db().sessions.push(s); save(); return s;
 }
@@ -457,7 +586,9 @@ export function restoreSession(id) {
   if (!s) return null;
   d.trashSessions = d.trashSessions.filter(x => x.id !== id);
   const { deletedAt, ...restored } = s;
-  d.sessions.push(restored);
+  // Doppelte id vermeiden (siehe restoreExercise) - sonst zaehlen alle
+  // Statistik-Funktionen die Einheit zweimal.
+  if (!d.sessions.some(x => x.id === restored.id)) d.sessions.push(restored);
   save();
   return restored;
 }
@@ -466,9 +597,26 @@ export function purgeTrashedSession(id) {
 }
 export function emptyTrash() {
   const d = db();
+  const purgedExIds = d.trashExercises.map(e => e.id);
   d.trashExercises = []; d.trashSessions = [];
   d.trashCardioSessions = [];
+  // Geräte-Notizen der endgültig entfernten Übungen mitentsorgen (deleteExercise
+  // behält sie absichtlich, damit eine Wiederherstellung vollständig ist).
+  if (purgedExIds.length) {
+    const gone = new Set(purgedExIds.filter(id => !d.exercises.some(e => e.id === id)));
+    if (gone.size) d.exerciseNotes = d.exerciseNotes.filter(n => !gone.has(n.exerciseId));
+  }
   save();
+}
+
+// Schnappschuss der Plan-Struktur eines Trainingstags. Basis für den Diff beim
+// Beenden - eine Stelle, damit Trainingsstart und Diff-Übernahme garantiert
+// dasselbe Format erzeugen.
+export function planSnapshotOf(day) {
+  return (day?.exercises || []).map(item => ({
+    exerciseId: item.exerciseId, sets: item.sets, reps: item.reps,
+    restSec: item.restSec, groupId: item.groupId || null,
+  }));
 }
 
 // ---------- Anpassungen während des Trainings zurück in den Plan übernehmen ----------
@@ -487,7 +635,7 @@ export function computeSessionPlanDiff(sessionId) {
   const snapMap = new Map(s.planSnapshot.map(x => [x.exerciseId, x]));
   const entryMap = new Map(s.entries.map(x => [x.exerciseId, x]));
   const diffs = [];
-  for (const entry of s.entries) {
+  s.entries.forEach((entry, entryIdx) => {
     const snap = snapMap.get(entry.exerciseId);
     if (!snap) {
       diffs.push({
@@ -495,8 +643,11 @@ export function computeSessionPlanDiff(sessionId) {
         sets: (entry.sets || []).length || settings.defaultSets,
         reps: entry.targetReps || settings.defaultReps,
         restSec: entry.restSec ?? settings.defaultRestSec,
+        // Position aus dem Training mitnehmen, damit die Übung im Plan an
+        // derselben Stelle landet und nicht stumpf hinten angehängt wird.
+        atIndex: entryIdx,
       });
-      continue;
+      return;
     }
     if (entry.restSec !== snap.restSec) {
       diffs.push({ type: 'restChanged', exerciseId: entry.exerciseId, name: entry.name, oldVal: snap.restSec, newVal: entry.restSec });
@@ -505,7 +656,10 @@ export function computeSessionPlanDiff(sessionId) {
     if (setCount !== snap.sets) {
       diffs.push({ type: 'setsChanged', exerciseId: entry.exerciseId, name: entry.name, oldVal: snap.sets, newVal: setCount });
     }
-  }
+    if (num(entry.targetReps) > 0 && num(entry.targetReps) !== num(snap.reps)) {
+      diffs.push({ type: 'repsChanged', exerciseId: entry.exerciseId, name: entry.name, oldVal: snap.reps, newVal: num(entry.targetReps) });
+    }
+  });
   for (const snap of s.planSnapshot) {
     if (!entryMap.has(snap.exerciseId)) {
       const ex = getExercise(snap.exerciseId);
@@ -544,16 +698,24 @@ export function computeSessionPlanDiff(sessionId) {
   const normalize = groups => groups.map(g => g.slice().sort().join(',')).sort();
   const snapGroupsForCompare = groupsOf(s.planSnapshot, commonSet);
   const entryGroupsForCompare = groupsOf(s.entries, commonSet);
-  if (JSON.stringify(normalize(snapGroupsForCompare)) !== JSON.stringify(normalize(entryGroupsForCompare))) {
-    const allEntryIds = new Set(s.entries.map(e => e.exerciseId));
-    const entryGroupsForApply = groupsOf(s.entries, allEntryIds);
+  const allEntryIds = new Set(s.entries.map(e => e.exerciseId));
+  const entryGroupsForApply = groupsOf(s.entries, allEntryIds);
+  // Zwei Vergleiche, weil beide Fälle eine Gruppierungs-Änderung sind:
+  // (a) die Gruppen der gemeinsamen Übungen unterscheiden sich, ODER
+  // (b) die vollständige Gruppierung im Training hat mehr/andere Gruppen als der
+  //     Plan-Schnappschuss - das ist der Fall, wenn eine im Training NEU
+  //     hinzugefügte Übung direkt mit in einen Zirkel aufgenommen wurde. Ohne (b)
+  //     blieb diese Gruppierung unsichtbar und wurde nie angeboten.
+  const groupsDiffer = JSON.stringify(normalize(snapGroupsForCompare)) !== JSON.stringify(normalize(entryGroupsForCompare))
+    || JSON.stringify(normalize(entryGroupsForApply)) !== JSON.stringify(normalize(groupsOf(s.planSnapshot, new Set(s.planSnapshot.map(x => x.exerciseId)))));
+  if (groupsDiffer) {
     diffs.push({
       type: 'groupingChanged',
       groups: entryGroupsForApply,
       // Übungen, die VORHER gruppiert waren (auch wenn sie jetzt in keiner Gruppe
       // mehr sind) - werden beim Übernehmen mit gelöst, sonst bliebe eine im
       // Training komplett aufgelöste Gruppe im Plan unverändert bestehen.
-      previousGroupedIds: snapGroupsForCompare.flat(),
+      previousGroupedIds: groupsOf(s.planSnapshot, new Set(s.planSnapshot.map(x => x.exerciseId))).flat(),
       groupNames: entryGroupsForApply.map(g => g.map(exId => (entryMap.get(exId) || {}).name || '?')),
     });
   }
@@ -565,37 +727,59 @@ export function computeSessionPlanDiff(sessionId) {
 // diese eine Einheit. Reihenfolge unabhängig von der Auswahl-Reihenfolge der
 // Checkboxen verarbeiten: erst hinzufügen/entfernen/anpassen, Reihenfolge zuletzt
 // (sonst würde eine neu hinzugefügte Übung beim Sortieren evtl. noch fehlen).
-const DIFF_PRIORITY = { exerciseRemoved: 0, exerciseAdded: 1, restChanged: 2, setsChanged: 2, orderChanged: 3, groupingChanged: 4 };
+const DIFF_PRIORITY = { exerciseRemoved: 0, exerciseAdded: 1, restChanged: 2, setsChanged: 2, repsChanged: 2, orderChanged: 3, groupingChanged: 4 };
 export function applyPlanDiffs(sessionId, changes) {
   const s = getSession(sessionId); if (!s) return { applied: 0 };
   const day = getDay(s.dayId); if (!day) return { applied: 0 };
   let applied = 0;
   const ordered = changes.slice().sort((a, b) => (DIFF_PRIORITY[a.type] ?? 9) - (DIFF_PRIORITY[b.type] ?? 9));
   ordered.forEach(ch => {
-    if (ch.type === 'restChanged' || ch.type === 'setsChanged') {
+    if (ch.type === 'restChanged' || ch.type === 'setsChanged' || ch.type === 'repsChanged') {
       const item = day.exercises.find(x => x.exerciseId === ch.exerciseId);
       if (!item) return;
       if (ch.type === 'restChanged') item.restSec = ch.newVal;
       if (ch.type === 'setsChanged') item.sets = ch.newVal;
+      if (ch.type === 'repsChanged') item.reps = ch.newVal;
       applied++;
     } else if (ch.type === 'exerciseAdded') {
+      // Nur übernehmen, wenn die Übung noch in der Bibliothek existiert - sonst
+      // entstünde im Trainingstag eine Zeile "(gelöscht)", die nie mehr sinnvoll
+      // wird (die Übung kann zwischen Trainingsstart und Beenden gelöscht worden
+      // sein, im Training bleibt sie als Kopie im entry sichtbar).
+      if (!getExercise(ch.exerciseId)) return;
       if (!day.exercises.some(x => x.exerciseId === ch.exerciseId)) {
-        day.exercises.push({ id: uid('de'), exerciseId: ch.exerciseId, sets: ch.sets, reps: ch.reps, restSec: ch.restSec, groupId: null });
+        // An der Position einfügen, die die Übung im Training hat - "hinten
+        // anhängen" hat die im Training gewählte Stelle bisher verworfen.
+        const item = { id: uid('de'), exerciseId: ch.exerciseId, sets: ch.sets, reps: ch.reps, restSec: ch.restSec, groupId: null };
+        const at = typeof ch.atIndex === 'number' ? Math.min(ch.atIndex, day.exercises.length) : day.exercises.length;
+        day.exercises.splice(at, 0, item);
         applied++;
       }
     } else if (ch.type === 'exerciseRemoved') {
       const before = day.exercises.length;
       day.exercises = day.exercises.filter(x => x.exerciseId !== ch.exerciseId);
-      if (day.exercises.length !== before) applied++;
+      if (day.exercises.length !== before) { pruneLoneGroups(day.exercises); applied++; }
     } else if (ch.type === 'orderChanged') {
+      // Blockweise stabil sortieren: ein Zirkel bewegt sich als EIN Block (Rang =
+      // kleinster Rang seiner Mitglieder), Übungen ohne Pendant im Training
+      // behalten über den Ursprungsindex ihre relative Lage. Ein einfaches
+      // sort() nach indexOf hat Zirkel zerrissen, weil Plan-Übungen ohne
+      // Trainings-Pendant (indexOf === -1) ans Listenende gerutscht sind -
+      // mitten aus einer Gruppe heraus.
       const orderIds = ch.orderExerciseIds;
-      day.exercises.sort((a, b) => {
-        const ia = orderIds.indexOf(a.exerciseId), ib = orderIds.indexOf(b.exerciseId);
-        if (ia === -1 && ib === -1) return 0;
-        if (ia === -1) return 1;
-        if (ib === -1) return -1;
-        return ia - ib;
+      const LAST = Number.MAX_SAFE_INTEGER;
+      const rankOf = it => { const i = orderIds.indexOf(it.exerciseId); return i === -1 ? LAST : i; };
+      const groupRank = new Map();
+      day.exercises.forEach(it => {
+        if (!it.groupId) return;
+        const prev = groupRank.has(it.groupId) ? groupRank.get(it.groupId) : LAST;
+        groupRank.set(it.groupId, Math.min(prev, rankOf(it)));
       });
+      const keyOf = it => (it.groupId ? groupRank.get(it.groupId) : rankOf(it));
+      day.exercises = day.exercises
+        .map((it, i) => ({ it, i }))
+        .sort((a, b) => (keyOf(a.it) - keyOf(b.it)) || (a.i - b.i))
+        .map(x => x.it);
       applied++;
     } else if (ch.type === 'groupingChanged') {
       // Erst alle betroffenen Übungen aus ihrer bisherigen Gruppe lösen (auch die,
@@ -607,9 +791,18 @@ export function applyPlanDiffs(sessionId, changes) {
         const itemIds = exIds.map(exId => day.exercises.find(it => it.exerciseId === exId)?.id).filter(Boolean);
         if (itemIds.length >= 2) regroupContiguous(day, itemIds);
       });
+      pruneLoneGroups(day.exercises);
       applied++;
     }
   });
+  // Sicherheitsnetz: nach beliebiger Kombination von Diffs muss die Invariante
+  // "gleiche groupId lückenlos zusammenhängend, mindestens zwei Mitglieder"
+  // wieder gelten.
+  pruneLoneGroups(day.exercises);
+  // Schnappschuss nachziehen, damit ein erneutes Beenden (nach "Als laufend
+  // markieren") nicht dieselben, bereits übernommenen Änderungen erneut anbietet
+  // und dabei zwischenzeitliche Plan-Korrekturen still zurückdreht.
+  if (applied) s.planSnapshot = planSnapshotOf(day);
   save();
   return { applied };
 }
@@ -873,7 +1066,7 @@ export function generateDemoSessions(locationId) {
       id: uid('ses'), locationId, planId: day.planId, dayId: day.id, dayName: day.name,
       date: dateISO, startedAt: ts, finishedAt: ts + 45 * 60000,
       emoji: day.emoji, color: day.color, note: '', entries,
-      planSnapshot: day.exercises.map(item => ({ exerciseId: item.exerciseId, sets: item.sets, reps: item.reps, restSec: item.restSec, groupId: item.groupId || null })),
+      planSnapshot: planSnapshotOf(day),
       demo: true,
     });
     count++;
@@ -883,7 +1076,12 @@ export function generateDemoSessions(locationId) {
 }
 export function removeDemoSessions(locationId = null) {
   const d = db();
-  d.sessions = d.sessions.filter(s => !(s.demo && (!locationId || s.locationId === locationId)));
+  const isDemo = s => s.demo && (!locationId || s.locationId === locationId);
+  d.sessions = d.sessions.filter(s => !isDemo(s));
+  // Auch den Papierkorb raeumen: eine einzeln geloeschte Beispiel-Einheit liegt
+  // dort weiter mit demo:true und koennte nach dem Abschalten der Beispieldaten
+  // wiederhergestellt werden - sie waere dann wieder in jeder Statistik.
+  d.trashSessions = d.trashSessions.filter(s => !isDemo(s));
   save();
 }
 export function hasDemoSessions(locationId = null) {
@@ -941,17 +1139,31 @@ export function importData(json, mode = 'replace') {
   if (!incoming || typeof incoming !== 'object') throw new Error('Ungültige Datei');
   if (mode === 'replace') {
     const d = DEFAULTS();
+    // Settings VOR dem Object.assign zusammenführen. Vorher wurde erst
+    // store = Object.assign(d, incoming) gebildet - dabei zeigte store.settings
+    // schon auf incoming.settings, und das anschließende
+    // Object.assign(d.settings, incoming.settings) mergte das Objekt in sich
+    // selbst. Ein Backup ohne neuere Einstellungs-Felder behielt so überall
+    // undefined statt der Defaults.
+    const mergedSettings = Object.assign({}, d.settings, incoming.settings || {});
     store = Object.assign(d, incoming);
-    // Settings einzeln zusammenführen (nicht komplett ersetzen) - ein älteres
-    // Backup ohne neuere Einstellungs-Felder soll dafür sinnvolle Defaults
-    // bekommen statt überall undefined (gleiche Logik wie in db()).
-    store.settings = Object.assign(d.settings, incoming.settings || {});
+    store.settings = mergedSettings;
   } else { // merge
     const d = db();
+    // Live-Liste und zugehörige Papierkorb-Liste teilen sich einen id-Raum: gegen
+    // die VEREINIGUNG beider deduplizieren, sonst landet eine lokal in den
+    // Papierkorb verschobene Einheit aus dem Backup erneut in der Live-Liste und
+    // existiert danach doppelt (Statistik zählt sie zweimal).
+    const PAIRS = [['sessions', 'trashSessions'], ['exercises', 'trashExercises'], ['cardioSessions', 'trashCardioSessions']];
+    const sharedIds = new Map(); // Listenname -> gemeinsames id-Set
+    PAIRS.forEach(([live, trash]) => {
+      const ids = new Set([...d[live].map(x => x.id), ...d[trash].map(x => x.id)]);
+      sharedIds.set(live, ids); sharedIds.set(trash, ids);
+    });
     ['exercises', 'locations', 'plans', 'days', 'sessions', 'trashExercises', 'trashSessions',
       'cardioPlans', 'cardioDays', 'cardioSessions', 'trashCardioSessions'].forEach(k => {
-      const existing = new Set(d[k].map(x => x.id));
-      (incoming[k] || []).forEach(x => { if (!existing.has(x.id)) d[k].push(x); });
+      const existing = sharedIds.get(k) || new Set(d[k].map(x => x.id));
+      (incoming[k] || []).forEach(x => { if (!existing.has(x.id)) { d[k].push(x); existing.add(x.id); } });
     });
     // Muskelgruppen/Geräte-Arten (Kraft + Kardio) nach Name deduplizieren (nicht
     // nach id) - sonst könnten z.B. zwei "Brust"-Einträge mit unterschiedlicher
@@ -993,17 +1205,45 @@ export function wipeAll() { store = DEFAULTS(); store.settings.seedVersion = SEE
 // ---------- Kardio-Geräte-Arten (zugleich die "Aktivitäten") ----------
 export function cardioEquipmentTypes() { return db().cardioEquipment.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')); }
 export function getCardioEquipmentType(id) { return db().cardioEquipment.find(e => e.id === id) || null; }
+// Wie addMuscleGroup/addEquipmentType: gleicher Name -> bestehenden Eintrag
+// zurückgeben statt ein Duplikat anzulegen.
 export function addCardioEquipment(name) {
+  name = String(name || '').trim(); if (!name) return null;
+  const existing = db().cardioEquipment.find(e => e.name.toLowerCase() === name.toLowerCase());
+  if (existing) return existing;
   const eq = { id: uid('ceq'), name, createdAt: Date.now() };
   db().cardioEquipment.push(eq); save(); return eq;
 }
+// Gleiche Regel wie renameMuscleGroup/renameEquipmentType beim Krafttraining:
+// bei Namensgleichheit zusammenführen statt ein zweites, gleichnamiges Gerät
+// anzulegen. Zwei gleichnamige Geräte wären in der Statistik nicht unterscheidbar
+// (Kardio referenziert Geräte über den Namen), und das Löschen des einen würde
+// die Trainingstag-Einträge des anderen mitnehmen.
 export function renameCardioEquipment(id, newName) {
+  newName = String(newName || '').trim(); if (!newName) return null;
   const d = db();
-  const eq = d.cardioEquipment.find(e => e.id === id); if (!eq) return;
-  const oldName = eq.name; eq.name = newName;
+  const eq = d.cardioEquipment.find(e => e.id === id); if (!eq) return null;
+  const oldName = eq.name;
+  if (oldName === newName) return { merged: false };
+  const clash = d.cardioEquipment.find(e => e.id !== id && e.name.toLowerCase() === newName.toLowerCase());
   d.cardioDays.forEach(day => day.activities.forEach(a => { if (a.equipment === oldName) a.equipment = newName; }));
   d.cardioSessions.forEach(s => (s.entries || []).forEach(e => { if (e.equipment === oldName) e.equipment = newName; }));
+  d.trashCardioSessions.forEach(s => (s.entries || []).forEach(e => { if (e.equipment === oldName) e.equipment = newName; }));
+  if (clash) {
+    d.cardioEquipment = d.cardioEquipment.filter(e => e.id !== id);
+    // Ein Trainingstag könnte jetzt dasselbe Gerät doppelt enthalten.
+    d.cardioDays.forEach(day => {
+      const seen = new Set();
+      day.activities = day.activities.filter(a => {
+        if (seen.has(a.equipment)) return false;
+        seen.add(a.equipment); return true;
+      });
+    });
+  } else {
+    eq.name = newName;
+  }
   save();
+  return { merged: !!clash };
 }
 export function deleteCardioEquipment(id) {
   const d = db();
@@ -1052,18 +1292,24 @@ export function reorderCardioDays(planId, orderedIds) {
 
 // item.equipment ist der Gerätename (Klartext-String, wie equipment bei
 // Kraftübungen) - kein id-Zwischenschritt nötig, da Aktivität = Gerät.
+// Die Funktionsnamen spiegeln bewusst die Kraft-Gegenstücke:
+//   addExerciseToDay      <->  addEquipmentToCardioDay
+//   removeExerciseFromDay <->  removeEquipmentFromCardioDay
+// Das persistierte Feld heißt weiterhin day.activities (aus der ersten Version
+// des Kardio-Moduls) - bewusst NICHT umbenannt, das wäre eine Datenmigration
+// ohne Nutzen für bestehende Installationen.
 export function addEquipmentToCardioDay(dayId, equipment) {
   const day = getCardioDay(dayId); if (!day) return;
   const item = { id: uid('cde'), equipment };
   day.activities.push(item); save(); return item;
 }
-export function removeCardioDayActivity(dayId, itemId) {
+export function removeEquipmentFromCardioDay(dayId, itemId) {
   const day = getCardioDay(dayId); if (!day) return;
   day.activities = day.activities.filter(x => x.id !== itemId); save();
 }
 // Einfaches Verschieben (rauf/runter) statt der komplexeren Zirkel-Mehrfachauswahl
 // beim Krafttraining - Kardio-Tage kombinieren i.d.R. nur 1-2 Geräte.
-export function moveCardioDayActivity(dayId, itemId, dir) {
+export function moveEquipmentInCardioDay(dayId, itemId, dir) {
   const day = getCardioDay(dayId); if (!day) return;
   const i = day.activities.findIndex(x => x.id === itemId); if (i < 0) return;
   const j = i + dir; if (j < 0 || j >= day.activities.length) return;
@@ -1125,7 +1371,8 @@ export function restoreCardioSession(id) {
   const s = d.trashCardioSessions.find(x => x.id === id); if (!s) return null;
   d.trashCardioSessions = d.trashCardioSessions.filter(x => x.id !== id);
   const { deletedAt, ...restored } = s;
-  d.cardioSessions.push(restored); save(); return restored;
+  if (!d.cardioSessions.some(x => x.id === restored.id)) d.cardioSessions.push(restored);
+  save(); return restored;
 }
 export function purgeTrashedCardioSession(id) {
   const d = db(); d.trashCardioSessions = d.trashCardioSessions.filter(x => x.id !== id); save();
@@ -1263,7 +1510,10 @@ export function generateCardioDemoSessions() {
   return count;
 }
 export function removeCardioDemoSessions() {
-  const d = db(); d.cardioSessions = d.cardioSessions.filter(s => !s.demo); save();
+  const d = db();
+  d.cardioSessions = d.cardioSessions.filter(s => !s.demo);
+  d.trashCardioSessions = d.trashCardioSessions.filter(s => !s.demo);
+  save();
 }
 export function hasCardioDemoSessions() { return db().cardioSessions.some(s => s.demo); }
 

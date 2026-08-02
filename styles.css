@@ -119,6 +119,21 @@ html, body {
   padding: 11px 12px calc(var(--tabbar-h) + var(--safe-b) + 16px);
   max-width: 720px; margin: 0 auto;
 }
+/* Solange eine fixierte Bottom-Leiste (.select-bar im Zirkel-/Reihenfolge-Modus)
+   eingeblendet ist, braucht der Inhalt zusaetzlichen Platz nach unten - sonst
+   verdeckt die Leiste den letzten Listeneintrag. Bewusst per :has() statt per
+   JS-Klasse: die Leiste wird an mehreren Stellen erzeugt und entfernt, eine
+   manuell gepflegte Klasse koennte dabei aus dem Tritt geraten. */
+#app:has(.select-bar) {
+  padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 80px);
+}
+/* Derselbe Fall für den schwebenden Plus-Button: er ragt 56px hoch ab
+   tabbar-h + safe-b + 16px und liegt damit (z-index 45) über den letzten Zeilen
+   am rechten Rand - genau dort, wo die Zeilen-Aktionen (⋮, 📈) sitzen. Ohne
+   reservierten Platz landet ein Tap auf der letzten Zeile auf dem FAB. */
+#app:has(.fab) {
+  padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 88px);
+}
 
 /* ---------- Tabbar ---------- */
 #tabbar {
@@ -159,6 +174,12 @@ html, body {
   display: grid; place-items: center; font-size: 1.2rem; font-weight: 700;
   background: var(--bg-elev2);
 }
+/* "grow" bedeutet überall dasselbe: nimm den restlichen Platz und lass langen Text
+   abschneiden, statt die Zeile zu sprengen. Vorher galt das nur innerhalb von
+   .list-row - in .card-Zeilen (Reihenfolge-Modus, Kardio-Geräte) fehlte es, wodurch
+   ein langer Übungsname die ▲/▼-Pfeile aus der Zeile gedrückt hat. */
+.grow { flex: 1; min-width: 0; }
+.grow > b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list-row .grow { flex: 1; min-width: 0; }
 .list-row .grow .r-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .95rem; }
 .list-row .grow .r-sub { color: var(--text-dim); font-size: .8rem; margin-top: 1px; }
@@ -348,6 +369,11 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
   max-width: calc(100% - 24px);
 }
 #restBar.hidden { display: none; }
+/* Die Leiste schwebt fixiert über dem Inhalt. Sie ist bewusst schmal und oben
+   platziert, darf aber die darunterliegende Gewichts-/Wdh.-Eingabe nicht
+   abfangen: Taps gehen durch, nur die eigenen Buttons bleiben bedienbar. */
+#restBar { pointer-events: none; }
+#restBar button { pointer-events: auto; }
 #restBar .rt-time { font-variant-numeric: tabular-nums; font-size: 1.15rem; min-width: 52px; text-align: center; }
 #restBar button { background: var(--on-accent-overlay, rgba(255,255,255,.2)); border: none; color: var(--on-accent, #fff); border-radius: 999px; padding: 6px 12px; font-weight: 700; cursor: pointer; }
 
@@ -474,7 +500,8 @@ a { color: var(--accent); }
   flex: 0 0 auto; width: 38px; height: 38px; border-radius: 11px;
   display: grid; place-items: center; font-size: 1.2rem; font-weight: 700;
 }
-.plan-acc summary .r-title { font-weight: 650; font-size: .95rem; }
+.plan-acc summary .grow { flex: 1; min-width: 0; }
+.plan-acc summary .r-title { font-weight: 650; font-size: .95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plan-acc summary .r-sub { color: var(--text-dim); font-size: .8rem; margin-top: 1px; }
 .plan-acc .acc-chevron {
   color: var(--text-dim2); font-size: 1.7rem; line-height: 1; transition: transform .15s;
