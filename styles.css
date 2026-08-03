@@ -359,6 +359,20 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 .tag-badge.equip { background: var(--equip-bg, rgba(134, 239, 172, .16)); color: var(--equip-color, #86efac); }
 .tag-badge.neutral { background: var(--bg-elev2); color: var(--text-dim); border: 1px solid var(--border); }
 
+/* Datum + mitlaufende Trainingsdauer im Trainings-Kopf. Umbruch erlaubt, damit
+   auf schmalen Geraeten die Dauer unter das Datum rutscht statt es zu quetschen. */
+.train-datetime {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px;
+}
+.train-elapsed {
+  font-size: .82rem; color: var(--text-dim); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.train-elapsed:empty { display: none; }
+/* Laufendes Training: hervorgehoben, damit man die tickende Dauer vom
+   abgeschlossenen Endwert unterscheidet. */
+.train-elapsed.live { color: var(--accent); }
+
 /* ---------- Rest timer ---------- */
 #restBar {
   position: fixed; left: 50%; transform: translateX(-50%);

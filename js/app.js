@@ -362,12 +362,15 @@ route('/plans', () => {
     html += `<div class="section-title">Laufendes Training</div>`;
     unfinished.forEach(s => {
       const doneSets = s.entries.reduce((a, e) => a + e.sets.filter(DB.isWorkingDone).length, 0);
+      // Laufzeit auch hier, wo man das Training fortsetzt - grob in Minuten, denn
+      // diese Karte tickt nicht mit (die sekundengenaue Uhr steht im Training).
+      const running = s.startedAt ? `läuft seit ${fmtDuration(Date.now() - s.startedAt)} · ` : '';
       html += `<div class="card tap" data-goto="/train/${s.id}">
         <div class="train-head">
           <div class="chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '💪')}</div>
           <div style="flex:1">
             <div style="font-weight:700">${esc(s.dayName || 'Training')}</div>
-            <div class="tiny muted">${fmtDate(s.date)} · ${doneSets} Sätze erledigt</div>
+            <div class="tiny muted">${fmtDate(s.date)} · ${running}${doneSets} Sätze erledigt</div>
           </div>
           <span class="btn primary sm">Weiter ›</span>
         </div>
@@ -1645,7 +1648,14 @@ function renderTrain(container, id) {
         <div class="chip" id="t-chip" style="background:${esc(s.color)}22;color:${esc(s.color)}">${esc(s.emoji || '💪')}</div>
         <div style="flex:1">
           <div style="font-weight:700">${esc(s.dayName || 'Training')}</div>
-          <input id="t-date" type="date" value="${esc(s.date)}" style="margin-top:6px;width:auto" />
+          <div class="train-datetime">
+            <input id="t-date" type="date" value="${esc(s.date)}" style="width:auto" />
+            <span class="train-elapsed ${finished ? '' : 'live'}" id="t-elapsed">${
+              finished
+                ? (s.startedAt ? '⏳ ' + fmtDuration(s.finishedAt - s.startedAt) : '')
+                : ''
+            }</span>
+          </div>
         </div>
       </div>
       <label class="field" style="margin:12px 0 0"><span>Notiz</span><textarea id="t-note" placeholder="z.B. gut drauf, Schulter zwickt …">${esc(s.note || '')}</textarea></label>
@@ -1667,6 +1677,10 @@ function renderTrain(container, id) {
   // Kopf-Felder
   $('#t-date', container).onchange = e => DB.updateSession(id, { date: e.target.value });
   $('#t-note', container).oninput = e => DB.updateSession(id, { note: e.target.value });
+  // Bei einem laufenden Training tickt die Dauer mit, bei einem abgeschlossenen
+  // steht die Endzeit schon im HTML (dieselbe Formatierung wie in der Liste
+  // "Letzte Trainings").
+  if (!finished && s.startedAt) startTrainClock(container, id); else stopTrainClock();
 
   renderEntries(container, id);
 
@@ -2159,7 +2173,18 @@ function releaseWakeLock() {
 // warten: der Intervall-Timer kann im Hintergrund minutenlang ausgesetzt haben.
 // Außerdem den Wake Lock erneut anfordern (den gibt der Browser beim Wechsel in
 // den Hintergrund automatisch frei) - aber nur, solange die Pause noch läuft.
+// Beim Zurueckkehren in die App: laufende Trainingsuhr neu aufsetzen. Der Wert
+// selbst wird aus den Zeitstempeln gerechnet und ist dadurch immer korrekt - es
+// geht nur darum, dass ueberhaupt wieder getickt wird.
+function resumeTrainClock() {
+  const out = document.getElementById('t-elapsed');
+  if (!out || !out.classList.contains('live')) return;
+  if (!trainContainer || !trainContainerSessionId) return;
+  startTrainClock(trainContainer, trainContainerSessionId);
+}
+
 function resumeRest() {
+  resumeTrainClock();
   if (!restTimer) return;
   ensureRestTicking();   // Tick wieder aufsetzen, falls der Browser ihn verworfen hat
   tickRest();            // und sofort nachrechnen, statt bis zum nächsten Tick zu warten
@@ -2963,6 +2988,45 @@ function fmtDuration(ms) {
   if (min < 60) return `${min} Min.`;
   const h = Math.floor(min / 60), m = min % 60;
   return `${h} Std. ${m} Min.`;
+}
+
+// Laufende Trainingsdauer als Stoppuhr (mm:ss bzw. h:mm:ss). Bewusst mit
+// Sekunden - eine reine Minutenangabe würde eine Minute lang stillstehen und
+// sähe aus wie eine eingefrorene Anzeige.
+function fmtStopwatch(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+  const mm = String(m).padStart(h ? 2 : 1, '0');
+  return (h ? `${h}:` : '') + `${mm}:${String(sec).padStart(2, '0')}`;
+}
+
+// ---------- Mitlaufende Trainingsdauer ----------
+// Wie beim Pausen-Timer wird die Dauer aus den Zeitstempeln berechnet und nicht
+// mitgezählt - dadurch stimmt sie auch, wenn das Handy zwischendurch gesperrt war
+// oder die App im Hintergrund lag (Browser drosseln setInterval dann stark).
+let trainClockIv = null;
+function stopTrainClock() {
+  if (trainClockIv) { clearInterval(trainClockIv); trainClockIv = null; }
+}
+function startTrainClock(container, sessionId) {
+  stopTrainClock();
+  const paint = () => {
+    const out = $('#t-elapsed', container);
+    // Element weg (Ansicht verlassen oder neu aufgebaut) -> Ticker beenden, sonst
+    // liefe er unsichtbar gegen ein abgehängtes DOM weiter.
+    if (!out || !out.isConnected) { stopTrainClock(); return; }
+    const s = DB.getSession(sessionId);
+    if (!s || !s.startedAt) { stopTrainClock(); return; }
+    if (s.finishedAt) {
+      out.classList.remove('live');
+      out.textContent = '⏳ ' + fmtDuration(s.finishedAt - s.startedAt);
+      stopTrainClock();
+      return;
+    }
+    out.textContent = '⏳ ' + fmtStopwatch(Date.now() - s.startedAt);
+  };
+  paint();
+  trainClockIv = setInterval(paint, 1000);
 }
 
 function currentStreak(byDate) {
