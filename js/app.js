@@ -664,6 +664,63 @@ function reorderStep(list, i, dir) {
   }
 }
 
+// Reihenfolge INNERHALB eines Zirkels: tauscht das Element an Index i mit seinem
+// Nachbarn, aber nur solange der Nachbar zur selben Gruppe gehört. Dadurch bleibt
+// die Gruppe garantiert lückenlos und gleich groß - es verschiebt sich nur die
+// Abfolge der Übungen im Zirkel (relevant, weil ein Zirkel in genau dieser
+// Reihenfolge durchlaufen wird).
+function reorderWithinGroup(list, i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= list.length) return false;
+  const gid = list[i] ? list[i].groupId : null;
+  if (!gid || list[j].groupId !== gid) return false;
+  [list[i], list[j]] = [list[j], list[i]];
+  return true;
+}
+
+// Gemeinsame Darstellung der Reihenfolge-Ansicht für Trainingstag UND laufendes
+// Training. Ein Zirkel erscheint als Block mit eigener Kopfzeile: die Pfeile dort
+// bewegen den GANZEN Zirkel, die Pfeile an den einzelnen Übungen darin ändern die
+// Reihenfolge INNERHALB des Zirkels. Diese Trennung ist nötig, weil sonst nicht
+// entscheidbar wäre, was ein Pfeil am Rand eines Zirkels bewegen soll.
+// keyOf liefert das Wert für die data-Attribute (Item-id im Trainingstag,
+// Listenindex im Training), blockAttr/innerAttr die Attributnamen.
+function reorderListHTML(list, nameOf, keyOf, blockAttr, innerAttr) {
+  let html = '';
+  let i = 0;
+  while (i < list.length) {
+    const gid = list[i].groupId;
+    if (gid) {
+      let j = i;
+      while (j < list.length && list[j].groupId === gid) j++;
+      html += `<div class="superset-wrap">
+        <div class="superset-label" style="display:flex;justify-content:space-between;align-items:center">
+          <span>🔗 Zirkel</span>
+          <span style="display:flex;align-items:center">${moveArrowsHTML(keyOf(list[i], i), i > 0, j < list.length, blockAttr)}</span>
+        </div>`;
+      for (let k = i; k < j; k++) {
+        html += `<div class="card" style="margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="grow"><b>${esc(nameOf(list[k]))}</b></div>
+            ${moveArrowsHTML(keyOf(list[k], k), k > i, k < j - 1, innerAttr)}
+          </div>
+        </div>`;
+      }
+      html += `</div>`;
+      i = j;
+    } else {
+      html += `<div class="card">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="grow"><b>${esc(nameOf(list[i]))}</b></div>
+          ${moveArrowsHTML(keyOf(list[i], i), i > 0, i < list.length - 1, blockAttr)}
+        </div>
+      </div>`;
+      i++;
+    }
+  }
+  return html;
+}
+
 // Analog zu DB.groupExercises/regroupContiguous, aber index-basiert - Trainings-
 // Entries haben (anders als Trainingstag-Übungen) keine eigene stabile id. Verschiebt
 // die ausgewählten Indizes (in Auswahl-Reihenfolge) zu einem zusammenhängenden Block
@@ -757,8 +814,13 @@ route('/day/:id', ({ id }) => {
       html += `<p class="tiny muted" style="margin-top:0">Wähle 2 oder mehr Übungen, die als Zirkel ohne Pause dazwischen trainiert werden sollen.</p>`;
       day.exercises.forEach(item => { html += daySelectCardHTML(item, selected); });
     } else if (dayMode === 'reorder') {
-      html += `<p class="tiny muted" style="margin-top:0">Mit ▲/▼ die Reihenfolge der Übungen ändern. Zirkel-Übungen bewegen sich als Block.</p>`;
-      day.exercises.forEach((item, idx) => { html += dayReorderCardHTML(item, idx, day.exercises); });
+      html += `<p class="tiny muted" style="margin-top:0">Mit ▲/▼ die Reihenfolge ändern. Die Pfeile an der Zirkel-Überschrift bewegen den ganzen Zirkel, die Pfeile an den Übungen darin ändern die Reihenfolge innerhalb des Zirkels.</p>`;
+      html += reorderListHTML(
+        day.exercises,
+        item => { const ex = DB.getExercise(item.exerciseId); return ex ? ex.name : '(gelöscht)'; },
+        item => item.id,
+        ['up', 'down'], ['gup', 'gdown'],
+      );
     } else {
       let i = 0;
       while (i < day.exercises.length) {
@@ -801,14 +863,21 @@ route('/day/:id', ({ id }) => {
     }
 
     if (dayMode === 'reorder') {
+      const byId = key => day.exercises.findIndex(x => x.id === key);
       $$('[data-up]', appEl).forEach(n => n.onclick = () => {
-        const idx = day.exercises.findIndex(x => x.id === n.dataset.up);
-        if (idx >= 0) reorderStep(day.exercises, idx, -1);
+        const idx = byId(n.dataset.up); if (idx >= 0) reorderStep(day.exercises, idx, -1);
         DB.save(); draw();
       });
       $$('[data-down]', appEl).forEach(n => n.onclick = () => {
-        const idx = day.exercises.findIndex(x => x.id === n.dataset.down);
-        if (idx >= 0) reorderStep(day.exercises, idx, 1);
+        const idx = byId(n.dataset.down); if (idx >= 0) reorderStep(day.exercises, idx, 1);
+        DB.save(); draw();
+      });
+      $$('[data-gup]', appEl).forEach(n => n.onclick = () => {
+        const idx = byId(n.dataset.gup); if (idx >= 0) reorderWithinGroup(day.exercises, idx, -1);
+        DB.save(); draw();
+      });
+      $$('[data-gdown]', appEl).forEach(n => n.onclick = () => {
+        const idx = byId(n.dataset.gdown); if (idx >= 0) reorderWithinGroup(day.exercises, idx, 1);
         DB.save(); draw();
       });
       const bar = el('div', { class: 'select-bar' });
@@ -908,7 +977,7 @@ function dayExerciseMenuModal(dayId, itemId, after) {
 // zu den Gegenstücken im laufenden Training benannt:
 //   dayExerciseCardHTML  <->  renderExerciseBlock   (Normalansicht)
 //   daySelectCardHTML    <->  trainSelectCardHTML   (Zirkel-Auswahl)
-//   dayReorderCardHTML   <->  trainReorderCardHTML  (Reihenfolge)
+//   (Reihenfolge: beide Ansichten teilen reorderListHTML)
 function dayExerciseCardHTML(item, locationId) {
   const ex = DB.getExercise(item.exerciseId);
   // Geräte-Notiz genauso sichtbar wie im laufenden Training (renderExerciseBlock) -
@@ -937,16 +1006,6 @@ function daySelectCardHTML(item, selected) {
       <div class="select-check ${isSel ? 'on' : ''}">${isSel ? '✓' : ''}</div>
       <div class="grow"><b>${item.groupId ? '🔗 ' : ''}${esc(ex ? ex.name : '(gelöscht)')}</b>
         <div class="tiny muted" style="margin-top:2px">${item.sets} Sätze × ${item.reps} Wdh</div></div>
-    </div>
-  </div>`;
-}
-function dayReorderCardHTML(item, idx, list) {
-  const ex = DB.getExercise(item.exerciseId);
-  const { canUp, canDown } = reorderBounds(list, idx);
-  return `<div class="card">
-    <div style="display:flex;align-items:center;gap:8px">
-      <div class="grow"><b>${item.groupId ? '🔗 ' : ''}${esc(ex ? ex.name : '(gelöscht)')}</b></div>
-      ${moveArrowsHTML(item.id, canUp, canDown)}
     </div>
   </div>`;
 }
@@ -1692,15 +1751,6 @@ function trainSelectCardHTML(entry, ei) {
     </div>
   </div>`;
 }
-function trainReorderCardHTML(entry, ei, list) {
-  const { canUp, canDown } = reorderBounds(list, ei);
-  return `<div class="card">
-    <div style="display:flex;align-items:center;gap:8px">
-      <div class="grow"><b>${entry.groupId ? '🔗 ' : ''}${esc(entry.name)}</b></div>
-      ${moveArrowsHTML(ei, canUp, canDown, ['tup', 'tdown'])}
-    </div>
-  </div>`;
-}
 
 function renderEntries(container, id) {
   const s = DB.getSession(id);
@@ -1747,14 +1797,22 @@ function renderEntries(container, id) {
   }
 
   if (trainMode === 'reorder') {
-    wrap.innerHTML = `<p class="tiny muted" style="margin-top:0">Mit ▲/▼ die Reihenfolge der Übungen ändern. Zirkel-Übungen bewegen sich als Block.</p>`;
-    s.entries.forEach((entry, ei) => { wrap.innerHTML += trainReorderCardHTML(entry, ei, s.entries); });
+    wrap.innerHTML = `<p class="tiny muted" style="margin-top:0">Mit ▲/▼ die Reihenfolge ändern. Die Pfeile an der Zirkel-Überschrift bewegen den ganzen Zirkel, die Pfeile an den Übungen darin ändern die Reihenfolge innerhalb des Zirkels.</p>`
+      + reorderListHTML(s.entries, e => e.name, (e, i) => i, ['tup', 'tdown'], ['tgup', 'tgdown']);
     $$('[data-tup]', wrap).forEach(n => n.onclick = () => {
       reorderStep(s.entries, parseInt(n.dataset.tup), -1);
       DB.save(); renderEntries(container, id);
     });
     $$('[data-tdown]', wrap).forEach(n => n.onclick = () => {
       reorderStep(s.entries, parseInt(n.dataset.tdown), 1);
+      DB.save(); renderEntries(container, id);
+    });
+    $$('[data-tgup]', wrap).forEach(n => n.onclick = () => {
+      reorderWithinGroup(s.entries, parseInt(n.dataset.tgup), -1);
+      DB.save(); renderEntries(container, id);
+    });
+    $$('[data-tgdown]', wrap).forEach(n => n.onclick = () => {
+      reorderWithinGroup(s.entries, parseInt(n.dataset.tgdown), 1);
       DB.save(); renderEntries(container, id);
     });
     const bar = el('div', { class: 'select-bar' });
@@ -1977,35 +2035,86 @@ function editTrainTargetsModal(entry, after) {
 }
 
 // ---------- Pausen-Timer ----------
+// Die verbleibende Zeit wird NICHT mitgezählt, sondern bei jedem Tick aus der
+// absoluten Endzeit (endsAt) und der aktuellen Uhrzeit berechnet. Ein
+// mitgezählter Sekunden-Zähler geht falsch, sobald das Handy sperrt oder eine
+// andere App im Vordergrund ist: Browser drosseln setInterval im Hintergrund
+// stark oder halten es ganz an. Mit absoluter Endzeit ist die Anzeige nach dem
+// Zurückkehren automatisch wieder korrekt, egal wie lange die App weg war.
 function ensureRestBar() {
   let bar = document.getElementById('restBar');
   if (!bar) {
     bar = el('div', { class: 'restbar hidden', id: 'restBar' });
-    bar.innerHTML = `<span>⏱</span><span class="rt-time">0:00</span><button data-add>+30</button><button data-stop>Stop</button>`;
+    bar.innerHTML = `<span class="rt-icon">⏱</span><span class="rt-label"></span><span class="rt-time">0:00</span><button data-add>+30</button><button data-stop>Stop</button>`;
     document.body.append(bar);
-    $('[data-add]', bar).onclick = () => { if (restTimer) { restTimer.remaining += 30; updateRestBar(); } };
+    $('[data-add]', bar).onclick = () => {
+      if (!restTimer) return;
+      // Nach Ablauf bedeutet "+30" eine neue halbe Minute ab jetzt, während der
+      // Pause werden 30s an die laufende Pause angehängt.
+      const now = Date.now();
+      restTimer.endsAt = restTimer.endsAt > now ? restTimer.endsAt + 30000 : now + 30000;
+      restTimer.notified = false;
+      updateRestBar();
+    };
     $('[data-stop]', bar).onclick = stopRest;
   }
   return bar;
 }
 function fmtTimer(sec) { const m = Math.floor(sec / 60), s = Math.max(0, sec % 60); return `${m}:${String(s).padStart(2, '0')}`; }
+
 function updateRestBar() {
   const bar = ensureRestBar();
   if (!restTimer) { bar.classList.add('hidden'); return; }
   bar.classList.remove('hidden');
-  $('.rt-time', bar).textContent = fmtTimer(restTimer.remaining);
+  const leftMs = restTimer.endsAt - Date.now();
+  const over = leftMs <= 0;
+  bar.classList.toggle('over', over);
+  if (over) {
+    // Nach Ablauf bleibt die Leiste stehen und zählt hoch, wie lange die Pause
+    // schon vorbei ist - so sieht man auch nach einem Blick aufs Handy sofort,
+    // wie viel Zeit seit dem Pausenende vergangen ist.
+    $('.rt-icon', bar).textContent = '✅';
+    $('.rt-label', bar).textContent = 'Ready';
+    $('.rt-time', bar).textContent = '+' + fmtTimer(Math.floor(-leftMs / 1000));
+  } else {
+    $('.rt-icon', bar).textContent = '⏱';
+    $('.rt-label', bar).textContent = '';
+    $('.rt-time', bar).textContent = fmtTimer(Math.ceil(leftMs / 1000));
+  }
 }
+
 function startRest(sec) {
   if (!sec || sec <= 0) return;
   stopRest();
-  restTimer = { remaining: sec, iv: null };
+  restTimer = { endsAt: Date.now() + sec * 1000, iv: null, notified: false };
   updateRestBar();
   acquireWakeLock();
-  restTimer.iv = setInterval(() => {
-    restTimer.remaining--;
-    if (restTimer.remaining <= 0) { beep(); notifyRestEnd(); stopRest(); toast('Pause vorbei ▶'); }
-    else updateRestBar();
-  }, 1000);
+  ensureRestTicking();
+}
+
+// Stellt sicher, dass überhaupt ein Tick läuft. Manche Browser verwerfen
+// Intervalle in einem lange schlafenden Tab ganz (statt sie nur zu drosseln) -
+// dann würde die Anzeige nach der Rückkehr einmal korrekt nachrechnen und
+// danach stehenbleiben. Deshalb beim Zurückkehren immer neu aufsetzen.
+function ensureRestTicking() {
+  if (!restTimer) return;
+  if (restTimer.iv) clearInterval(restTimer.iv);
+  restTimer.iv = setInterval(tickRest, 500);
+}
+
+// Ein Tick rechnet nur - er zählt nichts mit. 500ms statt 1000ms, damit der
+// Sekundenwechsel nicht bis zu einer Sekunde hinterherhängt.
+function tickRest() {
+  if (!restTimer) return;
+  const leftMs = restTimer.endsAt - Date.now();
+  if (leftMs <= 0 && !restTimer.notified) {
+    restTimer.notified = true;
+    beep(); notifyRestEnd(); toast('Pause vorbei ▶');
+    // Der Bildschirm muss nach dem Pausenende nicht mehr wachgehalten werden -
+    // die Leiste bleibt aber stehen und zählt weiter.
+    releaseWakeLock();
+  }
+  updateRestBar();
 }
 
 // Browser-Benachrichtigung am Pausenende (zusätzlich zu Ton/Vibration) - nur
@@ -2046,11 +2155,23 @@ async function acquireWakeLock() {
 function releaseWakeLock() {
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
 }
-// Wake Lock wird vom Browser automatisch freigegeben, wenn der Tab in den
-// Hintergrund geht - beim Zurückkehren erneut anfordern, falls der Timer noch läuft.
+// Beim Zurückkehren in die App sofort neu rechnen, statt bis zum nächsten Tick zu
+// warten: der Intervall-Timer kann im Hintergrund minutenlang ausgesetzt haben.
+// Außerdem den Wake Lock erneut anfordern (den gibt der Browser beim Wechsel in
+// den Hintergrund automatisch frei) - aber nur, solange die Pause noch läuft.
+function resumeRest() {
+  if (!restTimer) return;
+  ensureRestTicking();   // Tick wieder aufsetzen, falls der Browser ihn verworfen hat
+  tickRest();            // und sofort nachrechnen, statt bis zum nächsten Tick zu warten
+  if (restTimer && restTimer.endsAt > Date.now() && !wakeLock) acquireWakeLock();
+}
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && restTimer && !wakeLock) acquireWakeLock();
+  if (document.visibilityState === 'visible') resumeRest();
 });
+// Manche Browser feuern beim Aufwachen aus dem Sperrbildschirm nur 'focus' oder
+// 'pageshow' (letzteres auch beim Zurückholen aus dem Back/Forward-Cache).
+window.addEventListener('focus', resumeRest);
+window.addEventListener('pageshow', resumeRest);
 // Gemeinsamer AudioContext + Freischaltung.
 // iOS/Safari erlaubt Ton nur, wenn der AudioContext einmal per Nutzer-Geste
 // gestartet wurde. Deshalb beim ersten Antippen freischalten – danach kann

@@ -375,6 +375,11 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 #restBar { pointer-events: none; }
 #restBar button { pointer-events: auto; }
 #restBar .rt-time { font-variant-numeric: tabular-nums; font-size: 1.15rem; min-width: 52px; text-align: center; }
+#restBar .rt-label:empty { display: none; }
+#restBar .rt-label { font-size: .95rem; letter-spacing: .02em; }
+/* Nach Ablauf bleibt die Leiste stehen und zählt hoch - der Farbwechsel macht den
+   Zustandswechsel auf einen Blick erkennbar, ohne den Text lesen zu müssen. */
+#restBar.over { background: var(--good); }
 #restBar button { background: var(--on-accent-overlay, rgba(255,255,255,.2)); border: none; color: var(--on-accent, #fff); border-radius: 999px; padding: 6px 12px; font-weight: 700; cursor: pointer; }
 
 /* ---------- Modal ---------- */
