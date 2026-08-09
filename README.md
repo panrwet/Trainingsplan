@@ -97,12 +97,41 @@ automatisch. **Voraussetzung: das Repository ist öffentlich** (Pages für priva
 Repos braucht einen kostenpflichtigen Plan).
 
 1. Repo **öffentlich** schalten (Settings → General → Danger Zone → *Change visibility*).
-2. Der Workflow läuft beim nächsten Push (oder unter *Actions → Deploy to GitHub Pages → Run workflow*).
-3. Die Seite ist dann unter `https://panrwet.github.io/Trainingsplan/` erreichbar.
-4. **iPhone (Safari):** Seite öffnen → Teilen-Symbol → **„Zum Home-Bildschirm"**.
+2. Unter *Settings → Pages* als **Source** „**GitHub Actions**" wählen (nicht „Deploy from a branch").
+3. Der Workflow läuft beim nächsten Push (oder unter *Actions → Deploy to GitHub Pages → Run workflow*).
+4. Die Seite ist dann unter `https://panrwet.github.io/Trainingsplan/` erreichbar.
+5. **iPhone (Safari):** Seite öffnen → Teilen-Symbol → **„Zum Home-Bildschirm"**.
    **Android (Chrome):** Menü → **„App installieren"** / „Zum Startbildschirm".
 
 Danach läuft die App im Vollbild wie eine native App und funktioniert offline.
+
+> Der Workflow deployt vom Entwicklungs-Branch `claude/strength-training-tracker-oz92nr`,
+> weil der App-Code dort liegt (`main` enthält nur diese README). Wird der Branch
+> nach `main` gemerged, `main` einfach in der `branches:`-Liste des Workflows ergänzen.
+
+### Mehrere Geräte (Handy + Tablet): kein automatischer Abgleich
+
+Die App speichert **ausschließlich lokal im Browser** (localStorage) – es gibt
+keinen Server und kein Konto. Handy und Tablet haben deshalb **komplett getrennte
+Datenbestände**, die sich zu keinem Zeitpunkt von selbst abgleichen, auch nicht
+verzögert. Auf dem zweiten Gerät startet die App mit dem vorbefüllten Beispiel-
+Inhalt, nicht mit den eigenen Trainings.
+
+Wer beide Geräte nutzen will, überträgt die Daten von Hand:
+
+1. Auf dem Quellgerät: *Einstellungen → **⬇ Backup exportieren*** (JSON-Datei).
+2. Datei auf das andere Gerät bringen (AirDrop, Mail, Cloud-Ordner …).
+3. Dort: *Einstellungen → **⬆ Importieren***.
+   - **Ersetzen** – der lokale Bestand wird vollständig durch das Backup ersetzt.
+     Für „ein Gerät führt, das andere zieht nach" der richtige Modus.
+   - **Zusammenführen** – ergänzt nur, was noch fehlt (Abgleich über die id).
+     **Achtung:** Ein Eintrag, den es auf beiden Geräten mit derselben id gibt,
+     wird *nicht* überschrieben – wurde dasselbe Training auf beiden Geräten
+     unterschiedlich bearbeitet, gewinnt still die lokale Fassung.
+
+Praktikabel ist deshalb: **immer nur auf einem Gerät eintragen** und das andere
+per „Ersetzen"-Import nachziehen. Ein echter Live-Abgleich bräuchte einen Server
+oder Cloud-Speicher – bewusst nicht Teil dieser App.
 
 ### Hinweise für iPhone (iOS/Safari)
 

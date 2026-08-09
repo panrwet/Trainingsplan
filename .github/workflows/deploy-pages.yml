@@ -1,0 +1,46 @@
+name: Deploy to GitHub Pages
+
+# Deployt die App als statische Seite. Es gibt keinen Build-Schritt: index.html,
+# js/, styles.css, das Manifest, den Service Worker und die Icons liefert Pages
+# unveraendert aus. standalone.html wird nur fuer die Offline-Einzeldatei
+# gebraucht und stoert hier nicht.
+#
+# Der Push-Trigger nennt den Entwicklungs-Branch ausdruecklich, weil der App-Code
+# derzeit nur dort liegt. Wird der Branch spaeter nach main gemerged, kann main
+# unten einfach ergaenzt werden - dann deployt beides.
+on:
+  push:
+    branches:
+      - claude/strength-training-tracker-oz92nr
+  workflow_dispatch:
+
+# Rechte, die actions/deploy-pages braucht.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Laeuft immer nur ein Deploy gleichzeitig; ein laufendes wird nicht abgebrochen,
+# damit eine halb veroeffentlichte Seite nicht zurueckbleibt.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      # Das ganze Repo hochladen - die App besteht nur aus statischen Dateien.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
