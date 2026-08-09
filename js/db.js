@@ -833,6 +833,46 @@ export function isWorkingDone(set) {
 }
 export function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 
+// ---------- Reparatur: abgehakte Sätze ohne Wiederholungen ----------
+// Ein Fehler beim Abhaken hat Sätze als erledigt markiert, ohne die angezeigte
+// Wiederholungszahl zu übernehmen: der Platzhalter zeigte die Ziel-Wdh. aus dem
+// Plan, übernommen wurde aber nur ein Wert aus einem vorherigen Training - gab es
+// keines (erste Ausführung der Übung, oder heute mehr Sätze als beim letzten Mal),
+// blieb das Feld leer. Weil isWorkingDone() Wdh. > 0 verlangt, zählten diese Sätze
+// danach in KEINER Statistik mit, obwohl sie abgehakt aussahen.
+// Die Absicht ist eindeutig rekonstruierbar: entry.targetReps ist genau der Wert,
+// der damals als Platzhalter dastand. Das Gewicht bleibt unangetastet - dafür gibt
+// es keine Zielvorgabe, es wäre geraten.
+export function findRepairableSets() {
+  const out = [];
+  for (const s of db().sessions) {
+    for (const e of (s.entries || [])) {
+      const target = num(e.targetReps);
+      if (target <= 0) continue;
+      (e.sets || []).forEach((set, i) => {
+        if (set && set.done && num(set.reps) === 0) {
+          out.push({ sessionId: s.id, date: s.date, dayName: s.dayName || 'Training', exercise: e.name, setNo: i + 1, reps: target });
+        }
+      });
+    }
+  }
+  return out;
+}
+export function repairSets() {
+  let n = 0;
+  for (const s of db().sessions) {
+    for (const e of (s.entries || [])) {
+      const target = num(e.targetReps);
+      if (target <= 0) continue;
+      for (const set of (e.sets || [])) {
+        if (set && set.done && num(set.reps) === 0) { set.reps = target; n++; }
+      }
+    }
+  }
+  if (n) save();
+  return n;
+}
+
 // Epley-Formel für geschätztes 1RM
 export function epley1RM(weight, reps) {
   const w = num(weight), r = num(reps);

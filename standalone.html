@@ -1428,6 +1428,46 @@ function isWorkingDone(set) {
 }
 function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 
+// ---------- Reparatur: abgehakte Sätze ohne Wiederholungen ----------
+// Ein Fehler beim Abhaken hat Sätze als erledigt markiert, ohne die angezeigte
+// Wiederholungszahl zu übernehmen: der Platzhalter zeigte die Ziel-Wdh. aus dem
+// Plan, übernommen wurde aber nur ein Wert aus einem vorherigen Training - gab es
+// keines (erste Ausführung der Übung, oder heute mehr Sätze als beim letzten Mal),
+// blieb das Feld leer. Weil isWorkingDone() Wdh. > 0 verlangt, zählten diese Sätze
+// danach in KEINER Statistik mit, obwohl sie abgehakt aussahen.
+// Die Absicht ist eindeutig rekonstruierbar: entry.targetReps ist genau der Wert,
+// der damals als Platzhalter dastand. Das Gewicht bleibt unangetastet - dafür gibt
+// es keine Zielvorgabe, es wäre geraten.
+function findRepairableSets() {
+  const out = [];
+  for (const s of db().sessions) {
+    for (const e of (s.entries || [])) {
+      const target = num(e.targetReps);
+      if (target <= 0) continue;
+      (e.sets || []).forEach((set, i) => {
+        if (set && set.done && num(set.reps) === 0) {
+          out.push({ sessionId: s.id, date: s.date, dayName: s.dayName || 'Training', exercise: e.name, setNo: i + 1, reps: target });
+        }
+      });
+    }
+  }
+  return out;
+}
+function repairSets() {
+  let n = 0;
+  for (const s of db().sessions) {
+    for (const e of (s.entries || [])) {
+      const target = num(e.targetReps);
+      if (target <= 0) continue;
+      for (const set of (e.sets || [])) {
+        if (set && set.done && num(set.reps) === 0) { set.reps = target; n++; }
+      }
+    }
+  }
+  if (n) save();
+  return n;
+}
+
 // Epley-Formel für geschätztes 1RM
 function epley1RM(weight, reps) {
   const w = num(weight), r = num(reps);
@@ -2118,7 +2158,7 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-  return { db, save, uid, exercises, getExercise, addExercise, updateExercise, findDuplicateExercise, deleteExercise, trashedExercises, restoreExercise, purgeTrashedExercise, exerciseUsage, getExerciseNote, setExerciseNote, muscleGroups, getMuscleGroup, addMuscleGroup, renameMuscleGroup, deleteMuscleGroup, muscleGroupUsage, equipmentTypes, getEquipmentType, addEquipmentType, renameEquipmentType, deleteEquipmentType, equipmentUsage, locations, getLocation, getActiveLocationId, getActiveLocation, setActiveLocation, addLocation, updateLocation, deleteLocation, plansByLocation, getPlan, addPlan, updatePlan, deletePlan, copyPlanToLocation, copyDayToPlan, daysByPlan, getDay, addDay, updateDay, deleteDay, reorderDays, addExerciseToDay, updateDayExercise, removeExerciseFromDay, pruneLoneGroups, releaseOldGroups, groupExercises, ungroupExercises, sessions, getSession, startSession, updateSession, deleteSession, trashedSessions, restoreSession, purgeTrashedSession, emptyTrash, planSnapshotOf, computeSessionPlanDiff, applyPlanDiffs, lastEntryFor, hasData, isWorkingDone, num, epley1RM, exerciseHistory, exercisePRs, exercisesTrainedAtLocation, muscleVolumeStats, overallVolumeHistory, sessionCountInPeriod, topExercisesByFrequency, weeklySetsTrend, lastTrainedDate, generateDemoSessions, removeDemoSessions, hasDemoSessions, wipeSessions, globalSearch, sessionsByDate, exportData, importData, wipeAll, cardioEquipmentTypes, getCardioEquipmentType, addCardioEquipment, renameCardioEquipment, deleteCardioEquipment, cardioEquipmentUsage, cardioPlans, getCardioPlan, addCardioPlan, updateCardioPlan, deleteCardioPlan, cardioDaysByPlan, getCardioDay, addCardioDay, updateCardioDay, deleteCardioDay, reorderCardioDays, addEquipmentToCardioDay, removeEquipmentFromCardioDay, moveEquipmentInCardioDay, cardioSessions, getCardioSession, cardioEntryTemplate, logCardioSession, updateCardioSession, deleteCardioSession, cardioSessionsByDay, cardioSessionsByPlan, trashedCardioSessions, restoreCardioSession, purgeTrashedCardioSession, isCardioEntryDone, cardioHistoryByEquipment, cardioEquipmentStats, cardioHistoryByDay, cardioDayStats, cardioHistoryByPlan, cardioPlanStats, cardioSessionCountInPeriod, weeklyCardioMinutesTrend, topCardioEquipmentByFrequency, generateCardioDemoSessions, removeCardioDemoSessions, hasCardioDemoSessions, todayISO, SEED_VERSION };
+  return { db, save, uid, exercises, getExercise, addExercise, updateExercise, findDuplicateExercise, deleteExercise, trashedExercises, restoreExercise, purgeTrashedExercise, exerciseUsage, getExerciseNote, setExerciseNote, muscleGroups, getMuscleGroup, addMuscleGroup, renameMuscleGroup, deleteMuscleGroup, muscleGroupUsage, equipmentTypes, getEquipmentType, addEquipmentType, renameEquipmentType, deleteEquipmentType, equipmentUsage, locations, getLocation, getActiveLocationId, getActiveLocation, setActiveLocation, addLocation, updateLocation, deleteLocation, plansByLocation, getPlan, addPlan, updatePlan, deletePlan, copyPlanToLocation, copyDayToPlan, daysByPlan, getDay, addDay, updateDay, deleteDay, reorderDays, addExerciseToDay, updateDayExercise, removeExerciseFromDay, pruneLoneGroups, releaseOldGroups, groupExercises, ungroupExercises, sessions, getSession, startSession, updateSession, deleteSession, trashedSessions, restoreSession, purgeTrashedSession, emptyTrash, planSnapshotOf, computeSessionPlanDiff, applyPlanDiffs, lastEntryFor, hasData, isWorkingDone, num, findRepairableSets, repairSets, epley1RM, exerciseHistory, exercisePRs, exercisesTrainedAtLocation, muscleVolumeStats, overallVolumeHistory, sessionCountInPeriod, topExercisesByFrequency, weeklySetsTrend, lastTrainedDate, generateDemoSessions, removeDemoSessions, hasDemoSessions, wipeSessions, globalSearch, sessionsByDate, exportData, importData, wipeAll, cardioEquipmentTypes, getCardioEquipmentType, addCardioEquipment, renameCardioEquipment, deleteCardioEquipment, cardioEquipmentUsage, cardioPlans, getCardioPlan, addCardioPlan, updateCardioPlan, deleteCardioPlan, cardioDaysByPlan, getCardioDay, addCardioDay, updateCardioDay, deleteCardioDay, reorderCardioDays, addEquipmentToCardioDay, removeEquipmentFromCardioDay, moveEquipmentInCardioDay, cardioSessions, getCardioSession, cardioEntryTemplate, logCardioSession, updateCardioSession, deleteCardioSession, cardioSessionsByDay, cardioSessionsByPlan, trashedCardioSessions, restoreCardioSession, purgeTrashedCardioSession, isCardioEntryDone, cardioHistoryByEquipment, cardioEquipmentStats, cardioHistoryByDay, cardioDayStats, cardioHistoryByPlan, cardioPlanStats, cardioSessionCountInPeriod, weeklyCardioMinutesTrend, topCardioEquipmentByFrequency, generateCardioDemoSessions, removeCardioDemoSessions, hasCardioDemoSessions, todayISO, SEED_VERSION };
 })();
 
 // ============================================================
@@ -2227,7 +2267,10 @@ function confirmDialog(msg, { danger = false, okText = 'OK' } = {}) {
   return new Promise(resolve => {
     const close = openModal({
       title: 'Bestätigen',
-      body: `<p style="margin:0 0 4px">${esc(msg)}</p>`,
+      // pre-line, damit mehrzeilige Meldungen (z.B. Vorschaulisten) ihre
+      // Zeilenumbrueche behalten - esc() laesst \n stehen, HTML wuerde sie sonst
+      // zu Leerzeichen zusammenfalten.
+      body: `<p style="margin:0 0 4px;white-space:pre-line">${esc(msg)}</p>`,
       footer: `<button class="btn ghost" data-x>Abbrechen</button><button class="btn ${danger ? 'danger' : 'primary'}" data-ok>${esc(okText)}</button>`,
       onDismiss: () => resolve(false),
       onMount: (m, c) => {
@@ -4017,20 +4060,35 @@ function renderExerciseBlock(s, id, container, ei) {
 
   const setsEl = $('.sets', block);
   entry.sets.forEach((set, si) => {
+    // Vorbelegung EINMAL bestimmen und sowohl für die Platzhalter-Anzeige als auch
+    // für die Übernahme beim Abhaken verwenden. Beides lief vorher auseinander:
+    // angezeigt wurden "letztes Mal ODER Ziel-Wdh.", übernommen wurde aber nur
+    // "letztes Mal". Wer eine Übung zum ersten Mal machte (oder heute mehr Sätze
+    // als beim letzten Mal), sah als Platzhalter z.B. 10, bekam beim Abhaken aber
+    // einen leeren Wert gespeichert - und weil isWorkingDone() Wdh. > 0 verlangt,
+    // zählte der Satz danach in KEINER Statistik mit, obwohl er abgehakt aussah.
+    const lastSet = last?.entry.sets[si];
+    const preWeight = lastSet ? DB.num(lastSet.weight) : 0;
+    const preReps = lastSet ? DB.num(lastSet.reps) : DB.num(entry.targetReps);
+    const phWeight = preWeight > 0 ? fmtWeight(preWeight) : (entry.unit || 'kg');
+    const phReps = preReps > 0 ? preReps : '';
+
     const row = el('div', { class: 'set-row' + (set.done ? ' done' : '') });
     row.innerHTML = `
       <div class="setno">${si + 1}</div>
-      <input type="number" inputmode="decimal" step="0.5" placeholder="${last?.entry.sets[si] ? fmtWeight(DB.num(last.entry.sets[si].weight)) : (entry.unit || 'kg')}" value="${set.weight === '' ? '' : esc(set.weight)}" data-w />
-      <input type="number" inputmode="numeric" placeholder="${last?.entry.sets[si] ? DB.num(last.entry.sets[si].reps) : (entry.targetReps || '')}" value="${set.reps === '' ? '' : esc(set.reps)}" data-r />
+      <input type="text" inputmode="decimal" placeholder="${esc(phWeight)}" value="${set.weight === '' ? '' : esc(set.weight)}" data-w />
+      <input type="text" inputmode="numeric" placeholder="${esc(phReps)}" value="${set.reps === '' ? '' : esc(set.reps)}" data-r />
       <button class="set-check ${set.done ? 'on' : ''}" data-check>✓</button>`;
-    $('[data-w]', row).oninput = e => { set.weight = e.target.value; DB.save(); };
-    $('[data-r]', row).oninput = e => { set.reps = e.target.value; DB.save(); };
+    wireNumInput($('[data-w]', row), { decimal: true }, v => { set.weight = v; DB.save(); });
+    wireNumInput($('[data-r]', row), { decimal: false }, v => { set.reps = v; DB.save(); });
     $('[data-check]', row).onclick = () => {
       set.done = !set.done;
-      if (set.done && (set.weight === '' || set.reps === '')) {
-        // Platzhalter (letztes Mal) übernehmen, falls leer
-        if (set.weight === '' && last?.entry.sets[si]) set.weight = DB.num(last.entry.sets[si].weight);
-        if (set.reps === '' && last?.entry.sets[si]) set.reps = DB.num(last.entry.sets[si].reps);
+      if (set.done) {
+        // Genau das übernehmen, was als Platzhalter dasteht - nicht mehr und
+        // nicht weniger. Beim Gewicht gibt es keine Zielvorgabe: ohne "letztes
+        // Mal" bleibt es leer (z.B. Körpergewichtsübungen), das ist gewollt.
+        if (set.weight === '' && preWeight > 0) set.weight = preWeight;
+        if (set.reps === '' && preReps > 0) set.reps = preReps;
       }
       DB.save();
       row.classList.toggle('done', set.done);
@@ -4805,30 +4863,36 @@ function cardioEntryFieldsHTML(entry) {
   return `
     <div class="ex-head"><div class="ex-name">${esc(entry.equipment || '(kein Gerät)')}</div></div>
     <div class="row3">
-      <label class="field"><span>Dauer (Min.)</span><input type="number" inputmode="numeric" min="0" value="${entry.durationMin === '' ? '' : esc(entry.durationMin)}" data-f="durationMin" /></label>
-      <label class="field"><span>Distanz (km)</span><input type="number" inputmode="decimal" step="0.01" min="0" value="${entry.km === '' ? '' : esc(entry.km)}" data-f="km" /></label>
-      <label class="field"><span>Herzfrequenz</span><input type="number" inputmode="numeric" min="0" value="${entry.heartRate === '' ? '' : esc(entry.heartRate)}" data-f="heartRate" /></label>
+      <label class="field"><span>Dauer (Min.)</span><input type="text" inputmode="numeric" value="${entry.durationMin === '' ? '' : esc(entry.durationMin)}" data-f="durationMin" /></label>
+      <label class="field"><span>Distanz (km)</span><input type="text" inputmode="decimal" data-dec value="${entry.km === '' ? '' : esc(entry.km)}" data-f="km" /></label>
+      <label class="field"><span>Herzfrequenz</span><input type="text" inputmode="numeric" value="${entry.heartRate === '' ? '' : esc(entry.heartRate)}" data-f="heartRate" /></label>
     </div>
     <div class="row3">
-      <label class="field"><span>Zone</span><input type="number" inputmode="numeric" min="1" max="5" value="${entry.zone === '' ? '' : esc(entry.zone)}" data-f="zone" /></label>
-      <label class="field"><span>Stufe</span><input type="number" inputmode="numeric" min="0" value="${entry.level === '' ? '' : esc(entry.level)}" data-f="level" /></label>
-      <label class="field"><span>Kalorien</span><input type="number" inputmode="numeric" min="0" value="${entry.calories === '' ? '' : esc(entry.calories)}" data-f="calories" /></label>
+      <label class="field"><span>Zone</span><input type="text" inputmode="numeric" value="${entry.zone === '' ? '' : esc(entry.zone)}" data-f="zone" /></label>
+      <label class="field"><span>Stufe</span><input type="text" inputmode="numeric" value="${entry.level === '' ? '' : esc(entry.level)}" data-f="level" /></label>
+      <label class="field"><span>Kalorien</span><input type="text" inputmode="numeric" value="${entry.calories === '' ? '' : esc(entry.calories)}" data-f="calories" /></label>
     </div>
     <div class="row3">
-      <label class="field"><span>Watt</span><input type="number" inputmode="numeric" min="0" value="${entry.watt === '' ? '' : esc(entry.watt)}" data-f="watt" /></label>
-      <label class="field"><span>Höhenmeter</span><input type="number" inputmode="numeric" min="0" value="${entry.elevationM === '' ? '' : esc(entry.elevationM)}" data-f="elevationM" /></label>
+      <label class="field"><span>Watt</span><input type="text" inputmode="numeric" value="${entry.watt === '' ? '' : esc(entry.watt)}" data-f="watt" /></label>
+      <label class="field"><span>Höhenmeter</span><input type="text" inputmode="numeric" value="${entry.elevationM === '' ? '' : esc(entry.elevationM)}" data-f="elevationM" /></label>
       <div class="field"><span>Pace / km/h</span><div class="tiny muted" data-pace style="padding-top:8px">${cardioPaceText(entry)}</div></div>
     </div>
   `;
 }
 function wireCardioEntryFields(block, entry, onChange) {
-  $$('[data-f]', block).forEach(inp => inp.oninput = () => {
-    entry[inp.dataset.f] = inp.value;
-    if (inp.dataset.f === 'durationMin' || inp.dataset.f === 'km') {
-      const paceEl = $('[data-pace]', block);
-      if (paceEl) paceEl.textContent = cardioPaceText(entry);
-    }
-    onChange(inp.dataset.f);
+  // Textfelder mit Normalisierung statt type="number" - siehe normalizeNumInput:
+  // ein getipptes Komma wuerde sonst stillschweigend verschluckt und z.B. aus
+  // "5,3 km" die Distanz "53 km" machen. Nur die Distanz ist ein Dezimalfeld.
+  $$('[data-f]', block).forEach(inp => {
+    const decimal = inp.hasAttribute('data-dec');
+    wireNumInput(inp, { decimal }, v => {
+      entry[inp.dataset.f] = v;
+      if (inp.dataset.f === 'durationMin' || inp.dataset.f === 'km') {
+        const paceEl = $('[data-pace]', block);
+        if (paceEl) paceEl.textContent = cardioPaceText(entry);
+      }
+      onChange(inp.dataset.f);
+    });
   });
 }
 
@@ -5102,6 +5166,35 @@ function sessionRow(s) {
     <div class="grow"><div class="r-title">${esc(s.dayName || 'Training')}</div>
       <div class="r-sub">${fmtDate(s.date)}${duration ? ' · ' + duration : ''} · ${totalSets} Sätze · ${fmtWeight(vol)} kg Vol.</div></div>
     <span class="arrow">›</span></div>`;
+}
+
+// Deutsche Tastaturen liefern ein KOMMA als Dezimaltrenner. Ein
+// <input type="number"> verwirft das Komma stillschweigend, statt es zu
+// übernehmen oder abzulehnen: aus getipptem "77,5" wurde "775" - ein zehnfach zu
+// hoher Wert, der plausibel aussieht und das Volumen massiv verfälscht. Deshalb
+// sind die Zahlenfelder Textfelder mit inputmode (gleiche Tastatur auf dem Handy)
+// und eigener Normalisierung.
+function normalizeNumInput(raw, { decimal = true } = {}) {
+  let v = String(raw ?? '').replace(',', '.').replace(/[^0-9.]/g, '');
+  if (!decimal) return v.replace(/\./g, '');
+  const i = v.indexOf('.');
+  if (i >= 0) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/\./g, ''); // nur EIN Trennzeichen
+  return v;
+}
+
+// Hängt die Normalisierung an ein Eingabefeld. Der Feldinhalt wird nur dann
+// zurückgeschrieben, wenn wirklich etwas entfernt wurde - sonst würde der Cursor
+// bei jedem Tastendruck ans Ende springen.
+function wireNumInput(input, { decimal = true }, onValue) {
+  input.oninput = e => {
+    const v = normalizeNumInput(e.target.value, { decimal });
+    if (v !== e.target.value) {
+      const atEnd = e.target.selectionStart === e.target.value.length;
+      e.target.value = v;
+      if (!atEnd) { try { e.target.setSelectionRange(v.length, v.length); } catch (_) { /* egal */ } }
+    }
+    onValue(v);
+  };
 }
 
 function fmtDuration(ms) {
@@ -5496,6 +5589,7 @@ route('/settings', () => {
   const s = DB.db().settings;
   const stats = { ex: DB.exercises().length, loc: DB.locations().length, plans: DB.db().plans.length, days: DB.db().days.length, ses: DB.sessions().length };
   const trashCount = DB.trashedExercises().length + DB.trashedSessions().length + DB.trashedCardioSessions().length;
+  const repairable = DB.findRepairableSets();
   const activeLoc = DB.getActiveLocation();
 
   appEl.innerHTML = `
@@ -5606,6 +5700,11 @@ route('/settings', () => {
         <span style="margin:0">Kardio-Beispieldaten (ca. 2 Monate Testtrainings)</span></label>
       <p class="tiny muted" style="margin:8px 0 0">Erzeugt bzw. entfernt plausible Kardio-Testeinheiten (ortsunabhängig), um die Kardio-Statistik auszuprobieren. Braucht mindestens einen Kardio-Trainingstag mit Aktivitäten.</p>
 
+      ${repairable.length ? `<hr class="sep" />
+      <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Daten prüfen</div>
+      <p class="tiny muted" style="margin-top:0">Es wurden <b>${repairable.length} abgehakte Sätze ohne Wiederholungszahl</b> gefunden. Diese Sätze zählen in keiner Statistik mit, obwohl sie als erledigt markiert sind – Ursache war ein inzwischen behobener Fehler beim Abhaken. Die Ziel-Wiederholungen der jeweiligen Übung können nachgetragen werden (das Gewicht bleibt unangetastet).</p>
+      <button class="btn block" id="repairBtn">${repairable.length} Sätze reparieren</button>` : ''}
+
       <hr class="sep" />
       <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Papierkorb</div>
       <p class="tiny muted" style="margin-top:0">Gelöschte Übungen und Trainings bleiben hier, bis du sie wiederherstellst oder endgültig entfernst.</p>
@@ -5687,6 +5786,18 @@ route('/settings', () => {
     impFile.value = '';
   };
 
+  const repairBtn = $('#repairBtn', appEl);
+  if (repairBtn) repairBtn.onclick = async () => {
+    const list = DB.findRepairableSets();
+    const preview = list.slice(0, 6).map(r => `• ${fmtDate(r.date)} · ${r.exercise} (Satz ${r.setNo}) → ${r.reps} Wdh.`).join('\n');
+    const ok = await confirmDialog(
+      `${list.length} abgehakte Sätze bekommen die Ziel-Wiederholungen der Übung eingetragen:\n\n${preview}${list.length > 6 ? `\n… und ${list.length - 6} weitere` : ''}\n\nDas Gewicht bleibt unverändert.`,
+      { okText: 'Eintragen' });
+    if (!ok) return;
+    const n = DB.repairSets();
+    toast(`${n} Sätze ergänzt`);
+    render();
+  };
   $('#openTrashBtn', appEl).onclick = () => openTrashModal();
 
   $('#s-demo', appEl).onchange = e => {
