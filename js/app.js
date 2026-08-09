@@ -1924,17 +1924,31 @@ function renderExerciseBlock(s, id, container, ei) {
       set.done = !set.done;
       if (set.done) {
         // Genau das übernehmen, was als Platzhalter dasteht - nicht mehr und
-        // nicht weniger. Beim Gewicht gibt es keine Zielvorgabe: ohne "letztes
-        // Mal" bleibt es leer (z.B. Körpergewichtsübungen), das ist gewollt.
+        // nicht weniger. preReps ist "letztes Mal" oder ersatzweise die Ziel-Wdh.
+        // aus dem Plan, preWeight ist das Gewicht vom letzten Mal.
         if (set.weight === '' && preWeight > 0) set.weight = preWeight;
         if (set.reps === '' && preReps > 0) set.reps = preReps;
+        // Bleibt danach immer noch nichts übrig, gibt es weder eine Vorgabe noch
+        // einen Vorwert. Dann wird die 0 ausdrücklich eingetragen (statt ein
+        // leeres Feld zu hinterlassen) UND gewarnt - denn ein Satz ohne
+        // Wiederholungen zählt in keiner Statistik mit. Genau dieser Fall blieb
+        // früher unbemerkt.
+        if (DB.num(set.reps) <= 0) {
+          set.reps = 0;
+          toast('Keine Wiederholungen – dieser Satz zählt nicht in die Statistik');
+        }
+        // Beim Gewicht bleibt ein leeres Feld bewusst leer: Körpergewichts-
+        // übungen haben legitim kein Gewicht, eine erzwungene 0 wäre dort nur
+        // störend (gerechnet wird ein leeres Feld ohnehin als 0).
       }
       DB.save();
       row.classList.toggle('done', set.done);
       $('[data-check]', row).classList.toggle('on', set.done);
       $('[data-w]', row).value = set.weight === '' ? '' : set.weight;
       $('[data-r]', row).value = set.reps === '' ? '' : set.reps;
-      if (set.done && isLastInGroup(s.entries, ei)) startRest(entry.restSec);
+      // Pausen-Timer nur im laufenden Training - beim nachträglichen Bearbeiten
+      // einer abgeschlossenen Einheit wäre eine startende Pause sinnlos.
+      if (set.done && !s.finishedAt && isLastInGroup(s.entries, ei)) startRest(entry.restSec);
     };
     setsEl.append(row);
   });
@@ -3428,7 +3442,6 @@ route('/settings', () => {
   const s = DB.db().settings;
   const stats = { ex: DB.exercises().length, loc: DB.locations().length, plans: DB.db().plans.length, days: DB.db().days.length, ses: DB.sessions().length };
   const trashCount = DB.trashedExercises().length + DB.trashedSessions().length + DB.trashedCardioSessions().length;
-  const repairable = DB.findRepairableSets();
   const activeLoc = DB.getActiveLocation();
 
   appEl.innerHTML = `
@@ -3539,11 +3552,6 @@ route('/settings', () => {
         <span style="margin:0">Kardio-Beispieldaten (ca. 2 Monate Testtrainings)</span></label>
       <p class="tiny muted" style="margin:8px 0 0">Erzeugt bzw. entfernt plausible Kardio-Testeinheiten (ortsunabhängig), um die Kardio-Statistik auszuprobieren. Braucht mindestens einen Kardio-Trainingstag mit Aktivitäten.</p>
 
-      ${repairable.length ? `<hr class="sep" />
-      <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Daten prüfen</div>
-      <p class="tiny muted" style="margin-top:0">Es wurden <b>${repairable.length} abgehakte Sätze ohne Wiederholungszahl</b> gefunden. Diese Sätze zählen in keiner Statistik mit, obwohl sie als erledigt markiert sind – Ursache war ein inzwischen behobener Fehler beim Abhaken. Die Ziel-Wiederholungen der jeweiligen Übung können nachgetragen werden (das Gewicht bleibt unangetastet).</p>
-      <button class="btn block" id="repairBtn">${repairable.length} Sätze reparieren</button>` : ''}
-
       <hr class="sep" />
       <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Papierkorb</div>
       <p class="tiny muted" style="margin-top:0">Gelöschte Übungen und Trainings bleiben hier, bis du sie wiederherstellst oder endgültig entfernst.</p>
@@ -3625,18 +3633,6 @@ route('/settings', () => {
     impFile.value = '';
   };
 
-  const repairBtn = $('#repairBtn', appEl);
-  if (repairBtn) repairBtn.onclick = async () => {
-    const list = DB.findRepairableSets();
-    const preview = list.slice(0, 6).map(r => `• ${fmtDate(r.date)} · ${r.exercise} (Satz ${r.setNo}) → ${r.reps} Wdh.`).join('\n');
-    const ok = await confirmDialog(
-      `${list.length} abgehakte Sätze bekommen die Ziel-Wiederholungen der Übung eingetragen:\n\n${preview}${list.length > 6 ? `\n… und ${list.length - 6} weitere` : ''}\n\nDas Gewicht bleibt unverändert.`,
-      { okText: 'Eintragen' });
-    if (!ok) return;
-    const n = DB.repairSets();
-    toast(`${n} Sätze ergänzt`);
-    render();
-  };
   $('#openTrashBtn', appEl).onclick = () => openTrashModal();
 
   $('#s-demo', appEl).onchange = e => {

@@ -60,6 +60,9 @@ const DEFAULTS = () => {
       muscleColor: '#7dd3fc', equipColor: '#86efac', density: 'normal', cornerStyle: 'normal',
       // Daten
       backupReminderWeeks: 0, lastBackupAt: null, demoDataEnabled: false,
+      // Zeitstempel der einmaligen Satz-Reparatur (siehe db()); bei einer frischen
+      // Installation gibt es nichts zu reparieren, deshalb direkt gesetzt.
+      setsRepairedAt: Date.now(),
       // intern
       seedVersion: 0,
     },
@@ -98,6 +101,16 @@ export function db() {
   const d = DEFAULTS();
   for (const k of Object.keys(d)) if (store[k] === undefined) store[k] = d[k];
   store.settings = Object.assign(d.settings, store.settings || {});
+  // Einmalige Reparatur der Sätze, die durch den behobenen Abhak-Fehler ohne
+  // Wiederholungen gespeichert wurden (siehe repairSets weiter unten). Läuft
+  // genau einmal je Installation - der Zeitstempel verhindert eine Wiederholung,
+  // und die Ursache ist behoben, es kann also nichts Neues dazukommen.
+  if (!store.settings.setsRepairedAt) {
+    const n = repairSets({ silent: true });
+    store.settings.setsRepairedAt = Date.now();
+    if (n) console.info(`${n} abgehakte Sätze ohne Wiederholungen ergänzt (einmalige Reparatur).`);
+    try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) { /* beim nächsten save() erneut */ }
+  }
   return store;
 }
 
@@ -843,24 +856,12 @@ export function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 // Die Absicht ist eindeutig rekonstruierbar: entry.targetReps ist genau der Wert,
 // der damals als Platzhalter dastand. Das Gewicht bleibt unangetastet - dafür gibt
 // es keine Zielvorgabe, es wäre geraten.
-export function findRepairableSets() {
-  const out = [];
-  for (const s of db().sessions) {
-    for (const e of (s.entries || [])) {
-      const target = num(e.targetReps);
-      if (target <= 0) continue;
-      (e.sets || []).forEach((set, i) => {
-        if (set && set.done && num(set.reps) === 0) {
-          out.push({ sessionId: s.id, date: s.date, dayName: s.dayName || 'Training', exercise: e.name, setNo: i + 1, reps: target });
-        }
-      });
-    }
-  }
-  return out;
-}
-export function repairSets() {
+export function repairSets({ silent = false } = {}) {
   let n = 0;
-  for (const s of db().sessions) {
+  // Beim Aufruf aus db() heraus darf NICHT db() verwendet werden (Rekursion) -
+  // store ist dort bereits gesetzt, nur die Initialisierung laeuft noch.
+  const d = silent ? store : db();
+  for (const s of d.sessions) {
     for (const e of (s.entries || [])) {
       const target = num(e.targetReps);
       if (target <= 0) continue;
@@ -869,7 +870,7 @@ export function repairSets() {
       }
     }
   }
-  if (n) save();
+  if (n && !silent) save();
   return n;
 }
 

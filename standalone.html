@@ -655,6 +655,9 @@ const DEFAULTS = () => {
       muscleColor: '#7dd3fc', equipColor: '#86efac', density: 'normal', cornerStyle: 'normal',
       // Daten
       backupReminderWeeks: 0, lastBackupAt: null, demoDataEnabled: false,
+      // Zeitstempel der einmaligen Satz-Reparatur (siehe db()); bei einer frischen
+      // Installation gibt es nichts zu reparieren, deshalb direkt gesetzt.
+      setsRepairedAt: Date.now(),
       // intern
       seedVersion: 0,
     },
@@ -693,6 +696,16 @@ function db() {
   const d = DEFAULTS();
   for (const k of Object.keys(d)) if (store[k] === undefined) store[k] = d[k];
   store.settings = Object.assign(d.settings, store.settings || {});
+  // Einmalige Reparatur der Sätze, die durch den behobenen Abhak-Fehler ohne
+  // Wiederholungen gespeichert wurden (siehe repairSets weiter unten). Läuft
+  // genau einmal je Installation - der Zeitstempel verhindert eine Wiederholung,
+  // und die Ursache ist behoben, es kann also nichts Neues dazukommen.
+  if (!store.settings.setsRepairedAt) {
+    const n = repairSets({ silent: true });
+    store.settings.setsRepairedAt = Date.now();
+    if (n) console.info(`${n} abgehakte Sätze ohne Wiederholungen ergänzt (einmalige Reparatur).`);
+    try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) { /* beim nächsten save() erneut */ }
+  }
   return store;
 }
 
@@ -1438,24 +1451,12 @@ function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 // Die Absicht ist eindeutig rekonstruierbar: entry.targetReps ist genau der Wert,
 // der damals als Platzhalter dastand. Das Gewicht bleibt unangetastet - dafür gibt
 // es keine Zielvorgabe, es wäre geraten.
-function findRepairableSets() {
-  const out = [];
-  for (const s of db().sessions) {
-    for (const e of (s.entries || [])) {
-      const target = num(e.targetReps);
-      if (target <= 0) continue;
-      (e.sets || []).forEach((set, i) => {
-        if (set && set.done && num(set.reps) === 0) {
-          out.push({ sessionId: s.id, date: s.date, dayName: s.dayName || 'Training', exercise: e.name, setNo: i + 1, reps: target });
-        }
-      });
-    }
-  }
-  return out;
-}
-function repairSets() {
+function repairSets({ silent = false } = {}) {
   let n = 0;
-  for (const s of db().sessions) {
+  // Beim Aufruf aus db() heraus darf NICHT db() verwendet werden (Rekursion) -
+  // store ist dort bereits gesetzt, nur die Initialisierung laeuft noch.
+  const d = silent ? store : db();
+  for (const s of d.sessions) {
     for (const e of (s.entries || [])) {
       const target = num(e.targetReps);
       if (target <= 0) continue;
@@ -1464,7 +1465,7 @@ function repairSets() {
       }
     }
   }
-  if (n) save();
+  if (n && !silent) save();
   return n;
 }
 
@@ -2158,7 +2159,7 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-  return { db, save, uid, exercises, getExercise, addExercise, updateExercise, findDuplicateExercise, deleteExercise, trashedExercises, restoreExercise, purgeTrashedExercise, exerciseUsage, getExerciseNote, setExerciseNote, muscleGroups, getMuscleGroup, addMuscleGroup, renameMuscleGroup, deleteMuscleGroup, muscleGroupUsage, equipmentTypes, getEquipmentType, addEquipmentType, renameEquipmentType, deleteEquipmentType, equipmentUsage, locations, getLocation, getActiveLocationId, getActiveLocation, setActiveLocation, addLocation, updateLocation, deleteLocation, plansByLocation, getPlan, addPlan, updatePlan, deletePlan, copyPlanToLocation, copyDayToPlan, daysByPlan, getDay, addDay, updateDay, deleteDay, reorderDays, addExerciseToDay, updateDayExercise, removeExerciseFromDay, pruneLoneGroups, releaseOldGroups, groupExercises, ungroupExercises, sessions, getSession, startSession, updateSession, deleteSession, trashedSessions, restoreSession, purgeTrashedSession, emptyTrash, planSnapshotOf, computeSessionPlanDiff, applyPlanDiffs, lastEntryFor, hasData, isWorkingDone, num, findRepairableSets, repairSets, epley1RM, exerciseHistory, exercisePRs, exercisesTrainedAtLocation, muscleVolumeStats, overallVolumeHistory, sessionCountInPeriod, topExercisesByFrequency, weeklySetsTrend, lastTrainedDate, generateDemoSessions, removeDemoSessions, hasDemoSessions, wipeSessions, globalSearch, sessionsByDate, exportData, importData, wipeAll, cardioEquipmentTypes, getCardioEquipmentType, addCardioEquipment, renameCardioEquipment, deleteCardioEquipment, cardioEquipmentUsage, cardioPlans, getCardioPlan, addCardioPlan, updateCardioPlan, deleteCardioPlan, cardioDaysByPlan, getCardioDay, addCardioDay, updateCardioDay, deleteCardioDay, reorderCardioDays, addEquipmentToCardioDay, removeEquipmentFromCardioDay, moveEquipmentInCardioDay, cardioSessions, getCardioSession, cardioEntryTemplate, logCardioSession, updateCardioSession, deleteCardioSession, cardioSessionsByDay, cardioSessionsByPlan, trashedCardioSessions, restoreCardioSession, purgeTrashedCardioSession, isCardioEntryDone, cardioHistoryByEquipment, cardioEquipmentStats, cardioHistoryByDay, cardioDayStats, cardioHistoryByPlan, cardioPlanStats, cardioSessionCountInPeriod, weeklyCardioMinutesTrend, topCardioEquipmentByFrequency, generateCardioDemoSessions, removeCardioDemoSessions, hasCardioDemoSessions, todayISO, SEED_VERSION };
+  return { db, save, uid, exercises, getExercise, addExercise, updateExercise, findDuplicateExercise, deleteExercise, trashedExercises, restoreExercise, purgeTrashedExercise, exerciseUsage, getExerciseNote, setExerciseNote, muscleGroups, getMuscleGroup, addMuscleGroup, renameMuscleGroup, deleteMuscleGroup, muscleGroupUsage, equipmentTypes, getEquipmentType, addEquipmentType, renameEquipmentType, deleteEquipmentType, equipmentUsage, locations, getLocation, getActiveLocationId, getActiveLocation, setActiveLocation, addLocation, updateLocation, deleteLocation, plansByLocation, getPlan, addPlan, updatePlan, deletePlan, copyPlanToLocation, copyDayToPlan, daysByPlan, getDay, addDay, updateDay, deleteDay, reorderDays, addExerciseToDay, updateDayExercise, removeExerciseFromDay, pruneLoneGroups, releaseOldGroups, groupExercises, ungroupExercises, sessions, getSession, startSession, updateSession, deleteSession, trashedSessions, restoreSession, purgeTrashedSession, emptyTrash, planSnapshotOf, computeSessionPlanDiff, applyPlanDiffs, lastEntryFor, hasData, isWorkingDone, num, repairSets, epley1RM, exerciseHistory, exercisePRs, exercisesTrainedAtLocation, muscleVolumeStats, overallVolumeHistory, sessionCountInPeriod, topExercisesByFrequency, weeklySetsTrend, lastTrainedDate, generateDemoSessions, removeDemoSessions, hasDemoSessions, wipeSessions, globalSearch, sessionsByDate, exportData, importData, wipeAll, cardioEquipmentTypes, getCardioEquipmentType, addCardioEquipment, renameCardioEquipment, deleteCardioEquipment, cardioEquipmentUsage, cardioPlans, getCardioPlan, addCardioPlan, updateCardioPlan, deleteCardioPlan, cardioDaysByPlan, getCardioDay, addCardioDay, updateCardioDay, deleteCardioDay, reorderCardioDays, addEquipmentToCardioDay, removeEquipmentFromCardioDay, moveEquipmentInCardioDay, cardioSessions, getCardioSession, cardioEntryTemplate, logCardioSession, updateCardioSession, deleteCardioSession, cardioSessionsByDay, cardioSessionsByPlan, trashedCardioSessions, restoreCardioSession, purgeTrashedCardioSession, isCardioEntryDone, cardioHistoryByEquipment, cardioEquipmentStats, cardioHistoryByDay, cardioDayStats, cardioHistoryByPlan, cardioPlanStats, cardioSessionCountInPeriod, weeklyCardioMinutesTrend, topCardioEquipmentByFrequency, generateCardioDemoSessions, removeCardioDemoSessions, hasCardioDemoSessions, todayISO, SEED_VERSION };
 })();
 
 // ============================================================
@@ -4085,17 +4086,31 @@ function renderExerciseBlock(s, id, container, ei) {
       set.done = !set.done;
       if (set.done) {
         // Genau das übernehmen, was als Platzhalter dasteht - nicht mehr und
-        // nicht weniger. Beim Gewicht gibt es keine Zielvorgabe: ohne "letztes
-        // Mal" bleibt es leer (z.B. Körpergewichtsübungen), das ist gewollt.
+        // nicht weniger. preReps ist "letztes Mal" oder ersatzweise die Ziel-Wdh.
+        // aus dem Plan, preWeight ist das Gewicht vom letzten Mal.
         if (set.weight === '' && preWeight > 0) set.weight = preWeight;
         if (set.reps === '' && preReps > 0) set.reps = preReps;
+        // Bleibt danach immer noch nichts übrig, gibt es weder eine Vorgabe noch
+        // einen Vorwert. Dann wird die 0 ausdrücklich eingetragen (statt ein
+        // leeres Feld zu hinterlassen) UND gewarnt - denn ein Satz ohne
+        // Wiederholungen zählt in keiner Statistik mit. Genau dieser Fall blieb
+        // früher unbemerkt.
+        if (DB.num(set.reps) <= 0) {
+          set.reps = 0;
+          toast('Keine Wiederholungen – dieser Satz zählt nicht in die Statistik');
+        }
+        // Beim Gewicht bleibt ein leeres Feld bewusst leer: Körpergewichts-
+        // übungen haben legitim kein Gewicht, eine erzwungene 0 wäre dort nur
+        // störend (gerechnet wird ein leeres Feld ohnehin als 0).
       }
       DB.save();
       row.classList.toggle('done', set.done);
       $('[data-check]', row).classList.toggle('on', set.done);
       $('[data-w]', row).value = set.weight === '' ? '' : set.weight;
       $('[data-r]', row).value = set.reps === '' ? '' : set.reps;
-      if (set.done && isLastInGroup(s.entries, ei)) startRest(entry.restSec);
+      // Pausen-Timer nur im laufenden Training - beim nachträglichen Bearbeiten
+      // einer abgeschlossenen Einheit wäre eine startende Pause sinnlos.
+      if (set.done && !s.finishedAt && isLastInGroup(s.entries, ei)) startRest(entry.restSec);
     };
     setsEl.append(row);
   });
@@ -5589,7 +5604,6 @@ route('/settings', () => {
   const s = DB.db().settings;
   const stats = { ex: DB.exercises().length, loc: DB.locations().length, plans: DB.db().plans.length, days: DB.db().days.length, ses: DB.sessions().length };
   const trashCount = DB.trashedExercises().length + DB.trashedSessions().length + DB.trashedCardioSessions().length;
-  const repairable = DB.findRepairableSets();
   const activeLoc = DB.getActiveLocation();
 
   appEl.innerHTML = `
@@ -5700,11 +5714,6 @@ route('/settings', () => {
         <span style="margin:0">Kardio-Beispieldaten (ca. 2 Monate Testtrainings)</span></label>
       <p class="tiny muted" style="margin:8px 0 0">Erzeugt bzw. entfernt plausible Kardio-Testeinheiten (ortsunabhängig), um die Kardio-Statistik auszuprobieren. Braucht mindestens einen Kardio-Trainingstag mit Aktivitäten.</p>
 
-      ${repairable.length ? `<hr class="sep" />
-      <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Daten prüfen</div>
-      <p class="tiny muted" style="margin-top:0">Es wurden <b>${repairable.length} abgehakte Sätze ohne Wiederholungszahl</b> gefunden. Diese Sätze zählen in keiner Statistik mit, obwohl sie als erledigt markiert sind – Ursache war ein inzwischen behobener Fehler beim Abhaken. Die Ziel-Wiederholungen der jeweiligen Übung können nachgetragen werden (das Gewicht bleibt unangetastet).</p>
-      <button class="btn block" id="repairBtn">${repairable.length} Sätze reparieren</button>` : ''}
-
       <hr class="sep" />
       <div class="tiny muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Papierkorb</div>
       <p class="tiny muted" style="margin-top:0">Gelöschte Übungen und Trainings bleiben hier, bis du sie wiederherstellst oder endgültig entfernst.</p>
@@ -5786,18 +5795,6 @@ route('/settings', () => {
     impFile.value = '';
   };
 
-  const repairBtn = $('#repairBtn', appEl);
-  if (repairBtn) repairBtn.onclick = async () => {
-    const list = DB.findRepairableSets();
-    const preview = list.slice(0, 6).map(r => `• ${fmtDate(r.date)} · ${r.exercise} (Satz ${r.setNo}) → ${r.reps} Wdh.`).join('\n');
-    const ok = await confirmDialog(
-      `${list.length} abgehakte Sätze bekommen die Ziel-Wiederholungen der Übung eingetragen:\n\n${preview}${list.length > 6 ? `\n… und ${list.length - 6} weitere` : ''}\n\nDas Gewicht bleibt unverändert.`,
-      { okText: 'Eintragen' });
-    if (!ok) return;
-    const n = DB.repairSets();
-    toast(`${n} Sätze ergänzt`);
-    render();
-  };
   $('#openTrashBtn', appEl).onclick = () => openTrashModal();
 
   $('#s-demo', appEl).onchange = e => {
